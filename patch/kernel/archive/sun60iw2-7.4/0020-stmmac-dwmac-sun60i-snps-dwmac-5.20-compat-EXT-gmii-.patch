@@ -1,0 +1,1744 @@
+From 5b6b6ef36ff23ca3d4cc0ed28aac14ea6f0b269c Mon Sep 17 00:00:00 2001
+From: tumredsun <tumredsun@localhost>
+Date: Sat, 7 Nov 2026 12:13:59 +0000
+Subject: [PATCH 20/28] stmmac/dwmac-sun60i: snps,dwmac-5.20 compat + EXT gmii
+ clock + PHY reset - MDIO was reading wrong core type (DWMAC100 vs real GMAC4,
+ Synopsys 0x53) dts/opi4pro: drop init=/bin/sh, restore normal sysvinit/OpenRC
+ boot
+
+---
+ .../allwinner/sun60i-a733-orangepi-4-pro.dts  |   6 +-
+ .../arm64/boot/dts/allwinner/sun60i-a733.dtsi |   2 +-
+ arch/arm64/kernel/head.S                      |  15 +-
+ arch/arm64/kernel/pi/map_kernel.c             |   4 +
+ arch/arm64/kernel/setup.c                     |  99 +++++-
+ arch/arm64/kernel/smp.c                       |   2 +
+ drivers/base/core.c                           |  11 +
+ drivers/base/dd.c                             |  17 +
+ drivers/clk/clk.c                             |  17 +
+ drivers/clk/sunxi-ng/ccu-sun60i-a733.c        |   6 +
+ .../ethernet/stmicro/stmmac/dwmac-sun60i.c    |   6 +-
+ .../pci/controller/dwc/pcie-designware-host.c |  12 +-
+ drivers/pci/controller/dwc/pcie-designware.h  |   1 +
+ drivers/pci/controller/dwc/pcie-sun60i-a733.c | 329 +++++++++++++++++-
+ .../phy/allwinner/phy-sun60i-a733-serdes.c    |  55 ++-
+ drivers/pinctrl/sunxi/pinctrl-sun60i-a733-r.c |  16 +-
+ drivers/pinctrl/sunxi/pinctrl-sunxi-dt.c      |   6 +
+ drivers/pinctrl/sunxi/pinctrl-sunxi.c         |  44 ++-
+ drivers/pmdomain/sunxi/sun55i-pck600.c        |   6 +
+ include/linux/a733-snap.h                     |  66 ++++
+ init/do_mounts.c                              |  22 ++
+ init/main.c                                   | 148 +++++++-
+ 22 files changed, 852 insertions(+), 38 deletions(-)
+ create mode 100644 include/linux/a733-snap.h
+
+diff --git a/arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-4-pro.dts b/arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-4-pro.dts
+index f13f2d4a2..d7131f974 100644
+--- a/arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-4-pro.dts
++++ b/arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-4-pro.dts
+@@ -33,7 +33,7 @@ chosen {
+ 		/* ttyS0 listed BEFORE tty1: userspace (systemd/getty) must keep
+ 		 * the UART console alive - #82/power-blank after init proved
+ 		 * console=tty1-only leaves the board blind. */
+-		bootargs = "root=PARTUUID=527e29fa-1a14-4ec4-a4de-df61c015c083 rootwait rootfstype=ext4 earlycon=uart8250,mmio32,0x02500000 keep_bootcon console=ttyS0,115200n8 console=tty1 nokaslr consoleblank=0 loglevel=8 printk.time=1 logo.nologo clk_ignore_unused swiotlb=65536 cma=512M panic=5";
++		bootargs = "root=PARTUUID=527e29fa-1a14-4ec4-a4de-df61c015c083 rootwait rootfstype=ext4 earlycon=uart8250,mmio32,0x02500000 console=ttyS0,115200n8 consoleblank=0 loglevel=8 printk.time=1 clk_ignore_unused swiotlb=65536 cma=512M panic=5";
+ 	};
+ 
+ 	reg_gmac3v3: regulator-gmac-3v3 {
+@@ -118,6 +118,10 @@ mdio {
+ 		gmac0_phy0: ethernet-phy@1 {
+ 			compatible = "ethernet-phy-ieee802.3-c22";
+ 			reg = <1>;
++			max-speed = <1000>;
++			reset-gpios = <&pio 0 14 GPIO_ACTIVE_LOW>; /* PA14 */
++			reset-assert-us = <10000>;
++			reset-deassert-us = <150000>;
+ 		};
+ 	};
+ };
+diff --git a/arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi b/arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi
+index 1cce17c13..76da77b04 100644
+--- a/arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi
++++ b/arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi
+@@ -423,7 +423,7 @@ mmc2: mmc@4022000 {
+ 		};
+ 
+ 		gmac0: ethernet@4500000 {
+-			compatible = "allwinner,sun60i-a733-gmac0";
++			compatible = "allwinner,sun60i-a733-gmac0", "snps,dwmac-5.20";
+ 			reg = <0x4500000 0x8000>,
+ 			      <0x4508000 0x1000>;
+ 			interrupts = <GIC_SPI 172 IRQ_TYPE_LEVEL_HIGH>,
+diff --git a/arch/arm64/kernel/head.S b/arch/arm64/kernel/head.S
+index f531f383b..bbfe6aac1 100644
+--- a/arch/arm64/kernel/head.S
++++ b/arch/arm64/kernel/head.S
+@@ -84,7 +84,12 @@
+ 	 */
+ 	.macro uart_putc, ch
+ 	movz	x16, #0x0250, lsl #16
+-	mov	w17, #\ch
++	mov	w15, #0x8000
++1:	ldr	w17, [x16, #0x14]
++	tbnz	w17, #5, 2f
++	subs	w15, w15, #1
++	b.ne	1b
++2:	mov	w17, #\ch
+ 	str	w17, [x16]
+ 	.endm
+ 
+@@ -486,13 +491,17 @@ SYM_FUNC_START(__enable_mmu)
+ 	msr	ttbr0_el1, x2			// load TTBR0
+ 	load_ttbr1 x1, x1, x3
+ 
++	/*
++	 * A733 debug: M1 is safe here (MMU still off, UART is written via its
++	 * physical address). Do NOT emit a marker after set_sctlr_el1: secondary
++	 * CPUs then run on idmap_pg_dir, which does not map the UART, so the
++	 * store would fault before VBAR is set and the CPU would silently die.
++	 */
+ 	uart_putc 'M'
+ 	uart_putc '1'					// A733 debug: ttbr1 loaded
+ 	dsb	sy
+ 	isb
+ 	set_sctlr_el1	x0
+-	uart_putc 'M'
+-	uart_putc '2'					// A733 debug: mmu on
+ 
+ 	ret
+ SYM_FUNC_END(__enable_mmu)
+diff --git a/arch/arm64/kernel/pi/map_kernel.c b/arch/arm64/kernel/pi/map_kernel.c
+index ba539c110..3550cf818 100644
+--- a/arch/arm64/kernel/pi/map_kernel.c
++++ b/arch/arm64/kernel/pi/map_kernel.c
+@@ -26,6 +26,10 @@ extern void idmap_cpu_replace_ttbr1(phys_addr_t pgdir);
+  */
+ static noinline void __init pi_putc(char c)
+ {
++	int n = 100000;
++
++	while (n-- && !(*(volatile u32 *)0x02500014 & 0x20))
++		cpu_relax();
+ 	*(volatile u32 *)0x02500000 = (u32)c;
+ }
+ 
+diff --git a/arch/arm64/kernel/setup.c b/arch/arm64/kernel/setup.c
+index 1f9ae3d6c..943e9927c 100644
+--- a/arch/arm64/kernel/setup.c
++++ b/arch/arm64/kernel/setup.c
+@@ -28,6 +28,7 @@
+ #include <linux/proc_fs.h>
+ #include <linux/memblock.h>
+ #include <linux/of_fdt.h>
++#include <linux/libfdt.h>
+ #include <linux/efi.h>
+ #include <linux/psci.h>
+ #include <linux/sched/task.h>
+@@ -282,13 +283,50 @@ u64 cpu_logical_map(unsigned int cpu)
+ /* A733 debug: direct UART0 trace while the idmap is still installed */
+ static noinline void __init a733_putc(char c)
+ {
++	int n = 100000;
++
++	while (n-- && !(*(volatile u32 *)0x02500014 & 0x20))
++		cpu_relax();
+ 	*(volatile u32 *)0x02500000 = (u32)c;
+ }
+ 
+ /* A733 debug: same UART through the permanent fixmap (survives idmap removal) */
+ static noinline void __init a733_fix_putc(char c)
+ {
+-	*(volatile u32 *)__fix_to_virt(FIX_EARLYCON_MEM_BASE) = (u32)c;
++	volatile u32 *base = (volatile u32 *)__fix_to_virt(FIX_EARLYCON_MEM_BASE);
++	int n = 100000;
++
++	while (n-- && !(base[5] & 0x20))
++		cpu_relax();
++	base[0] = (u32)c;
++}
++
++static noinline void __init a733_hex(u64 v)
++{
++	int i;
++
++	for (i = 60; i >= 0; i -= 4) {
++		unsigned int d = (v >> i) & 0xf;
++
++		a733_fix_putc(d < 10 ? '0' + d : 'a' + d - 10);
++	}
++}
++
++static noinline void __init a733_div_dump(char tag)
++{
++	volatile u32 *u = (volatile u32 *)__fix_to_virt(FIX_EARLYCON_MEM_BASE);
++	u32 lcr, dll, dlm;
++
++	lcr = u[3];
++	u[3] = lcr | 0x80;
++	dll = u[0];
++	dlm = u[1];
++	u[3] = lcr;
++
++	a733_fix_putc(tag);
++	a733_fix_putc(':');
++	a733_hex(((u64)dlm << 16) | dll);
++	a733_fix_putc(';');
+ }
+ 
+ void __init __no_sanitize_address setup_arch(char **cmdline_p)
+@@ -306,6 +344,33 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
+ 
+ 	setup_machine_fdt(__fdt_pointer);
+ 	a733_fix_putc('S'); a733_fix_putc('3');
++	a733_fix_putc('F'); a733_hex((u64)__fdt_pointer);
++	a733_fix_putc('/'); a733_hex((u64)fdt_totalsize(initial_boot_params));
++	a733_fix_putc(';');
++	{
++		const u32 *h = (const u32 *)initial_boot_params;
++		unsigned int off = fdt_off_dt_struct(initial_boot_params) / 4;
++		int i;
++
++		a733_fix_putc('H');
++		for (i = 0; i < 6; i++) {
++			a733_fix_putc(':'); a733_hex(h[i]);
++		}
++		a733_fix_putc(']');
++		for (i = 0; i < 8; i++) {
++			a733_fix_putc(':'); a733_hex(h[off + i]);
++		}
++		a733_fix_putc(';');
++	}
++	{
++		const char *m = of_flat_dt_get_machine_name();
++		int i;
++
++		a733_fix_putc('G'); a733_fix_putc(':');
++		for (i = 0; m && i < 40 && m[i]; i++)
++			a733_fix_putc(m[i]);
++		a733_fix_putc(';');
++	}
+ 	{
+ 		const char *p = boot_command_line;
+ 		int i;
+@@ -314,7 +379,30 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
+ 		for (i = 0; i < 100 && p[i]; i++)
+ 			a733_fix_putc(p[i]);
+ 		a733_fix_putc('|');
++		a733_fix_putc('M'); a733_hex(memblock_phys_mem_size());
++		a733_fix_putc(','); a733_hex((u64)memblock.memory.cnt);
++		a733_fix_putc(';');
++	}
++	a733_div_dump('D');
++
++	/*
++	 * A733 debug: this vendor U-Boot hands the kernel a damaged FDT
++	 * (no bootargs, /memory zeroed), so provide both from the kernel.
++	 */
++	if (!boot_command_line[0]) {
++		strscpy(boot_command_line,
++			"root=PARTUUID=527e29fa-1a14-4ec4-a4de-df61c015c083 rootwait rootfstype=ext4 earlycon=uart8250,mmio32,0x02500000 nokaslr console=ttyS0,115200 console=tty1 consoleblank=0 loglevel=7 clk_ignore_unused swiotlb=65536 cma=512M",
++			COMMAND_LINE_SIZE);
++		a733_fix_putc('K'); a733_fix_putc('1');
++	}
++	if (memblock_phys_mem_size() == 0) {
++		memblock_add(0x40000000, 0x180000000);
++		a733_fix_putc('R'); a733_fix_putc('1');
+ 	}
++	a733_fix_putc('R'); a733_fix_putc('2');
++	a733_hex(memblock_phys_mem_size());
++	a733_fix_putc(','); a733_hex((u64)memblock.memory.cnt);
++	a733_fix_putc(';');
+ 
+ 	/*
+ 	 * Initialise the static keys early as they may be enabled by the
+@@ -323,6 +411,7 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
+ 	jump_label_init();
+ 	parse_early_param();
+ 	a733_fix_putc('S'); a733_fix_putc('4');
++	a733_div_dump('E');
+ 	
+ 	dynamic_scs_init();
+ 
+@@ -348,7 +437,9 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
+ 	a733_fix_putc('U'); a733_fix_putc('0');
+ 
+ 	xen_early_init();
++	a733_fix_putc('V'); a733_fix_putc('0');
+ 	efi_init();
++	a733_fix_putc('V'); a733_fix_putc('1');
+ 
+ 	if (!efi_enabled(EFI_BOOT)) {
+ 		if ((u64)_text % MIN_KIMG_ALIGN)
+@@ -356,8 +447,14 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
+ 		WARN_TAINT(mmu_enabled_at_boot, TAINT_FIRMWARE_WORKAROUND,
+ 			   FW_BUG "Booted with MMU enabled!");
+ 	}
++	a733_fix_putc('W'); a733_fix_putc('0');
+ 
+ 	arm64_memblock_init();
++	a733_fix_putc('V'); a733_fix_putc('2');
++	a733_fix_putc('M'); a733_fix_putc('3');
++	a733_hex(memblock_phys_mem_size());
++	a733_fix_putc(','); a733_hex((u64)memblock.memory.cnt);
++	a733_fix_putc(';');
+ 
+ 	paging_init();
+ 	a733_fix_putc('P'); a733_fix_putc('2');
+diff --git a/arch/arm64/kernel/smp.c b/arch/arm64/kernel/smp.c
+index 014b163ce..be14607fe 100644
+--- a/arch/arm64/kernel/smp.c
++++ b/arch/arm64/kernel/smp.c
+@@ -201,6 +201,8 @@ asmlinkage notrace void secondary_start_kernel(void)
+ 	const struct cpu_operations *ops;
+ 	unsigned int cpu = smp_processor_id();
+ 
++	pr_info("A733: CPU%u entered secondary_start_kernel\n", cpu);
++
+ 	/*
+ 	 * All kernel threads share the same mm context; grab a
+ 	 * reference and switch to it.
+diff --git a/drivers/base/core.c b/drivers/base/core.c
+index cbe05197d..57a3e3428 100644
+--- a/drivers/base/core.c
++++ b/drivers/base/core.c
+@@ -13,6 +13,7 @@
+ #include <linux/cleanup.h>
+ #include <linux/cpufreq.h>
+ #include <linux/device.h>
++#include <linux/a733-snap.h>
+ #include <linux/dma-map-ops.h> /* for dma_default_coherent */
+ #include <linux/err.h>
+ #include <linux/fwnode.h>
+@@ -1131,6 +1132,10 @@ int device_links_check_suppliers(struct device *dev)
+ 	struct device_link *link;
+ 	int ret = 0, fwnode_ret = 0;
+ 	struct fwnode_handle *sup_fw;
++	bool a733_dbg = dev_name(dev) && !strcmp(dev_name(dev), "6000000.pcie");
++
++	if (a733_dbg)
++		a733_pcie_snap("rA");
+ 
+ 	/*
+ 	 * Device waiting for supplier to become available is not allowed to
+@@ -1147,8 +1152,14 @@ int device_links_check_suppliers(struct device *dev)
+ 		}
+ 	}
+ 
++	if (a733_dbg)
++		a733_pcie_snap("rB");
++
+ 	device_links_write_lock();
+ 
++	if (a733_dbg)
++		a733_pcie_snap("rC");
++
+ 	list_for_each_entry(link, &dev->links.suppliers, c_node) {
+ 		if (!device_link_test(link, DL_FLAG_MANAGED))
+ 			continue;
+diff --git a/drivers/base/dd.c b/drivers/base/dd.c
+index 521232519..dba92f3fd 100644
+--- a/drivers/base/dd.c
++++ b/drivers/base/dd.c
+@@ -20,6 +20,7 @@
+ #include <linux/device.h>
+ #include <linux/delay.h>
+ #include <linux/dma-map-ops.h>
++#include <linux/a733-snap.h>
+ #include <linux/init.h>
+ #include <linux/module.h>
+ #include <linux/kthread.h>
+@@ -656,6 +657,8 @@ static int really_probe(struct device *dev, const struct device_driver *drv)
+ 			   !drv->suppress_bind_attrs;
+ 	int ret, link_ret;
+ 
++	a733_pcie_snap("rE");
++
+ 	if (defer_all_probes) {
+ 		/*
+ 		 * Value of defer_all_probes can be set only by
+@@ -666,10 +669,15 @@ static int really_probe(struct device *dev, const struct device_driver *drv)
+ 		return -EPROBE_DEFER;
+ 	}
+ 
++	a733_pcie_snap("rP");
++
++	pr_emerg("a733-q> %s %s\n", dev_name(dev), drv->name);
+ 	link_ret = device_links_check_suppliers(dev);
+ 	if (link_ret == -EPROBE_DEFER)
+ 		return link_ret;
+ 
++	a733_pcie_snap("r0");
++
+ 	dev_dbg(dev, "bus: '%s': %s: probing driver %s with device\n",
+ 		drv->bus->name, __func__, drv->name);
+ 	if (!list_empty(&dev->devres_head)) {
+@@ -686,12 +694,16 @@ static int really_probe(struct device *dev, const struct device_driver *drv)
+ 	if (ret)
+ 		goto pinctrl_bind_failed;
+ 
++	a733_pcie_snap("r1");
++
+ 	if (dev->bus->dma_configure) {
+ 		ret = dev->bus->dma_configure(dev);
+ 		if (ret)
+ 			goto pinctrl_bind_failed;
+ 	}
+ 
++	a733_pcie_snap("r2");
++
+ 	ret = driver_sysfs_add(dev);
+ 	if (ret) {
+ 		dev_err(dev, "%s: driver_sysfs_add failed\n", __func__);
+@@ -704,7 +716,10 @@ static int really_probe(struct device *dev, const struct device_driver *drv)
+ 			goto probe_failed;
+ 	}
+ 
++	a733_pcie_snap("r3");
++
+ 	ret = call_driver_probe(dev, drv);
++	pr_emerg("a733-q= %s %s ret=%d\n", dev_name(dev), drv->name, ret);
+ 	if (ret) {
+ 		/*
+ 		 * If fw_devlink_best_effort is active (denoted by -EAGAIN), the
+@@ -754,7 +769,9 @@ static int really_probe(struct device *dev, const struct device_driver *drv)
+ 	if (dev->pm_domain && dev->pm_domain->sync)
+ 		dev->pm_domain->sync(dev);
+ 
++	pr_emerg("a733-b> %s\n", dev_name(dev));
+ 	driver_bound(dev);
++	pr_emerg("a733-b= %s\n", dev_name(dev));
+ 	dev_dbg(dev, "bus: '%s': %s: bound device to driver %s\n",
+ 		drv->bus->name, __func__, drv->name);
+ 	goto done;
+diff --git a/drivers/clk/clk.c b/drivers/clk/clk.c
+index 4d2cc86bf..5eff0ca3c 100644
+--- a/drivers/clk/clk.c
++++ b/drivers/clk/clk.c
+@@ -1249,6 +1249,15 @@ int clk_prepare(struct clk *clk)
+ }
+ EXPORT_SYMBOL_GPL(clk_prepare);
+ 
++int clk_pcie_watch(const char *cmd, const char *name);
++
++int clk_pcie_watch(const char *cmd, const char *name)
++{
++	pr_emerg("a733-clk: %s %s\n", cmd, name);
++	return 0;
++}
++EXPORT_SYMBOL_GPL(clk_pcie_watch);
++
+ static void clk_core_disable(struct clk_core *core)
+ {
+ 	lockdep_assert_held(&enable_lock);
+@@ -1256,6 +1265,10 @@ static void clk_core_disable(struct clk_core *core)
+ 	if (!core)
+ 		return;
+ 
++	if (core->name) {
++		clk_pcie_watch("-", core->name);
++	}
++
+ 	if (WARN(core->enable_count == 0, "%s already disabled\n", core->name))
+ 		return;
+ 
+@@ -1315,6 +1328,10 @@ static int clk_core_enable(struct clk_core *core)
+ 	if (!core)
+ 		return 0;
+ 
++	if (core->name) {
++		clk_pcie_watch("+", core->name);
++	}
++
+ 	if (WARN(core->prepare_count == 0,
+ 	    "Enabling unprepared %s\n", core->name))
+ 		return -ESHUTDOWN;
+diff --git a/drivers/clk/sunxi-ng/ccu-sun60i-a733.c b/drivers/clk/sunxi-ng/ccu-sun60i-a733.c
+index 14a0818f9..0ebec76f3 100644
+--- a/drivers/clk/sunxi-ng/ccu-sun60i-a733.c
++++ b/drivers/clk/sunxi-ng/ccu-sun60i-a733.c
+@@ -11,6 +11,7 @@
+ 
+ 
+ 
++#include <linux/a733-snap.h>
+ #include <dt-bindings/clock/sun60i-a733-ccu.h>
+ #include <dt-bindings/reset/sun60i-a733-ccu.h>
+ 
+@@ -2820,6 +2821,7 @@ static const struct sunxi_ccu_desc sun60i_a733_ccu_desc = {
+ 	.num_resets	= ARRAY_SIZE(sun60i_a733_ccu_resets),
+ };
+ 
++
+ static int sun60i_a733_ccu_probe(struct platform_device *pdev)
+ {
+ 	void __iomem *reg;
+@@ -2830,6 +2832,8 @@ static int sun60i_a733_ccu_probe(struct platform_device *pdev)
+ 	if (IS_ERR(reg))
+ 		return PTR_ERR(reg);
+ 
++	a733_pcie_snap("c0");
++
+ 	/*
+ 	 * The PLL clock code does not model all bits, for instance it does
+ 	 * not support a separate enable and gate bit. We present the
+@@ -2846,6 +2850,8 @@ static int sun60i_a733_ccu_probe(struct platform_device *pdev)
+ 	if (ret)
+ 		return ret;
+ 
++	a733_pcie_snap("c1");
++
+ 	return 0;
+ }
+ 
+diff --git a/drivers/net/ethernet/stmicro/stmmac/dwmac-sun60i.c b/drivers/net/ethernet/stmicro/stmmac/dwmac-sun60i.c
+index 26c0b783f..b8846ae6e 100644
+--- a/drivers/net/ethernet/stmicro/stmmac/dwmac-sun60i.c
++++ b/drivers/net/ethernet/stmicro/stmmac/dwmac-sun60i.c
+@@ -55,7 +55,11 @@ static int sun60i_gmac_syscfg(struct device *dev, void __iomem *syscfg_base,
+ 	case PHY_INTERFACE_MODE_RGMII_ID:
+ 	case PHY_INTERFACE_MODE_RGMII_RXID:
+ 	case PHY_INTERFACE_MODE_RGMII_TXID:
+-		reg |= FIELD_PREP(GMAC210_ETCS, GMAC210_ETCS_INT_GMII) |
++		/* The reference GMII/TX clock comes from the SoC PHY-clk
++		 * fanout (aw/soc-phy-clk-en), so the GMII side is fed
++		 * externally and ETCS selects the external source,
++		 * matching the vendor dwmac-sunxi glue. */
++		reg |= FIELD_PREP(GMAC210_ETCS, GMAC210_ETCS_EXT_GMII) |
+ 		       GMAC210_EPIT;
+ 		break;
+ 	case PHY_INTERFACE_MODE_RMII:
+diff --git a/drivers/pci/controller/dwc/pcie-designware-host.c b/drivers/pci/controller/dwc/pcie-designware-host.c
+index bbb02458a..b6c12482d 100644
+--- a/drivers/pci/controller/dwc/pcie-designware-host.c
++++ b/drivers/pci/controller/dwc/pcie-designware-host.c
+@@ -8,6 +8,7 @@
+  * Author: Jingoo Han <jg1.han@samsung.com>
+  */
+ 
++#include <linux/a733-snap.h>
+ #include <linux/align.h>
+ #include <linux/iopoll.h>
+ #include <linux/irqchip/chained_irq.h>
+@@ -567,6 +568,7 @@ static int dw_pcie_host_get_resources(struct dw_pcie_rp *pp)
+ 	return 0;
+ }
+ 
++
+ int dw_pcie_host_init(struct dw_pcie_rp *pp)
+ {
+ 	struct dw_pcie *pci = to_dw_pcie_from_pp(pp);
+@@ -576,6 +578,7 @@ int dw_pcie_host_init(struct dw_pcie_rp *pp)
+ 	int ret;
+ 
+ 	raw_spin_lock_init(&pp->lock);
++	a733_pcie_snap("h0");
+ 
+ 	bridge = devm_pci_alloc_host_bridge(dev, 0);
+ 	if (!bridge)
+@@ -594,6 +597,7 @@ int dw_pcie_host_init(struct dw_pcie_rp *pp)
+ 	}
+ 
+ 	if (pp->ops->init) {
++		a733_pcie_snap("h1");
+ 		ret = pp->ops->init(pp);
+ 		if (ret)
+ 			goto err_free_ecam;
+@@ -1178,9 +1182,11 @@ int dw_pcie_setup_rc(struct dw_pcie_rp *pp)
+ 	/* Program correct class for RC */
+ 	dw_pcie_writew_dbi(pci, PCI_CLASS_DEVICE, PCI_CLASS_BRIDGE_PCI);
+ 
+-	val = dw_pcie_readl_dbi(pci, LINK_WIDTH_SPEED_CTRL);
+-	val |= SPEED_CHANGE;
+-	dw_pcie_writel_dbi(pci, LINK_WIDTH_SPEED_CTRL, val);
++	if (!pp->skip_speed_change) {
++		val = dw_pcie_readl_dbi(pci, LINK_WIDTH_SPEED_CTRL);
++		val |= SPEED_CHANGE;
++		dw_pcie_writel_dbi(pci, LINK_WIDTH_SPEED_CTRL, val);
++	}
+ 
+ 	dw_pcie_dbi_ro_wr_dis(pci);
+ 
+diff --git a/drivers/pci/controller/dwc/pcie-designware.h b/drivers/pci/controller/dwc/pcie-designware.h
+index 6d788aa00..f9a0e36a8 100644
+--- a/drivers/pci/controller/dwc/pcie-designware.h
++++ b/drivers/pci/controller/dwc/pcie-designware.h
+@@ -472,6 +472,7 @@ struct dw_pcie_rp {
+ 	bool			skip_pwrctrl_off;
+ 	/* Set if the RC loses power during suspend */
+ 	bool                    suspend_poweroff;
++	bool			skip_speed_change;
+ };
+ 
+ struct dw_pcie_ep_ops {
+diff --git a/drivers/pci/controller/dwc/pcie-sun60i-a733.c b/drivers/pci/controller/dwc/pcie-sun60i-a733.c
+index 7e683c220..1c04a292d 100644
+--- a/drivers/pci/controller/dwc/pcie-sun60i-a733.c
++++ b/drivers/pci/controller/dwc/pcie-sun60i-a733.c
+@@ -11,18 +11,22 @@
+  * MSI controller towards the GIC ITS block.
+  */
+ 
++#include <linux/a733-snap.h>
++#include <linux/bitfield.h>
+ #include <linux/clk.h>
+ #include <linux/delay.h>
+ #include <linux/err.h>
+ #include <linux/gpio/consumer.h>
+ #include <linux/irq.h>
+ #include <linux/irqchip/chained_irq.h>
++#include <linux/io.h>
+ #include <linux/irqdomain.h>
+ #include <linux/of.h>
+ #include <linux/phy/phy.h>
+ #include <linux/platform_device.h>
+ #include <linux/regulator/consumer.h>
+ #include <linux/reset.h>
++#include <linux/sizes.h>
+ 
+ #include "pcie-designware.h"
+ 
+@@ -43,6 +47,9 @@
+ 
+ #define SUNXI_PCIE_APP_OFFSET			0x400000
+ 
++/* Unrolled iATU outbound window block, offsets from DBI. */
++#define SUNXI_PCIE_ATU_OB_BASE			0x300000
++
+ static const struct clk_bulk_data sun60i_a733_pcie_clks[] = {
+ 	{ .id = "aux" },
+ 	{ .id = "slv" },
+@@ -66,6 +73,7 @@ struct sun60i_a733_pcie {
+ 	size_t			rst_cnt;
+ 
+ 	struct phy		*phy;
++	bool			phy_inited;
+ 
+ 	struct irq_domain	*intx_domain;
+ 	int			sii_irq;
+@@ -227,12 +235,204 @@ static const struct dw_pcie_ops sun60i_a733_pcie_ops = {
+ 	.stop_link	= sun60i_a733_pcie_stop_link,
+ };
+ 
+-static int sun60i_a733_pcie_hw_init(struct sun60i_a733_pcie *pcie)
++static void sun60i_a733_pcie_dump_link(struct dw_pcie *pci, const char *tag)
++{
++	int cap = dw_pcie_find_capability(pci, PCI_CAP_ID_EXP);
++	u32 dbg0 = dw_pcie_readl_dbi(pci, PCIE_PORT_DEBUG0);
++	u32 dbg1 = dw_pcie_readl_dbi(pci, PCIE_PORT_DEBUG1);
++
++	dev_info(pci->dev,
++		 "dbg: %s DEBUG0=%08x ltssm=%s DEBUG1=%08x LNKCAP=%08x LNKCTL2=%08x LNKSTA=%04x\n",
++		 tag, dbg0,
++		 dw_pcie_ltssm_status_string(FIELD_GET(PORT_LOGIC_LTSSM_STATE_MASK, dbg0)),
++		 dbg1, dw_pcie_readl_dbi(pci, cap + PCI_EXP_LNKCAP),
++		 dw_pcie_readl_dbi(pci, cap + PCI_EXP_LNKCTL2),
++		 dw_pcie_readw_dbi(pci, cap + PCI_EXP_LNKSTA));
++}
++
++static void sun60i_a733_pcie_dump_atu0(struct dw_pcie *pci, const char *tag)
++{
++	u32 b = SUNXI_PCIE_ATU_OB_BASE;
++
++	dev_info(pci->dev,
++		 "dbg: %s atu0 lb=%08x ub=%08x lim=%08x lt=%08x ut=%08x cr1=%08x cr2=%08x\n",
++		 tag, dw_pcie_readl_dbi(pci, b + 0x08),
++		 dw_pcie_readl_dbi(pci, b + 0x0c),
++		 dw_pcie_readl_dbi(pci, b + 0x10),
++		 dw_pcie_readl_dbi(pci, b + 0x14),
++		 dw_pcie_readl_dbi(pci, b + 0x18),
++		 dw_pcie_readl_dbi(pci, b + 0x00),
++		 dw_pcie_readl_dbi(pci, b + 0x04));
++}
++
++static void sun60i_a733_pcie_dump_cfg(struct device *dev, u32 addr,
++				      const char *tag)
++{
++	void __iomem *m = ioremap(addr, SZ_4K);
++
++	if (!m)
++		return;
++
++	dev_info(dev, "dbg: %s read@%08x = %08x %08x\n", tag, addr,
++		 readl(m), readl(m + 4));
++	iounmap(m);
++}
++
++
++/*
++ * Cold bring-up mirroring the vendor loader (u-boot pcie-sunxi): the
++ * link parameters are programmed while the link training is disabled,
++ * the PERST toggles around the whole configuration, the LTSSM is
++ * enabled afterwards and a directed speed change completes the
++ * training at the internal target rate.
++ */
++static void sun60i_a733_pcie_vendor_init(struct sun60i_a733_pcie *pcie)
+ {
+ 	struct dw_pcie *pci = &pcie->pci;
++	int cap, i;
++	u32 val;
++
++	cap = dw_pcie_find_capability(pci, PCI_CAP_ID_EXP);
++
++	sun60i_a733_pcie_ltssm_disable(pcie);
++
++	gpiod_set_value_cansleep(pcie->wake_gpio, 1);
++	gpiod_set_value_cansleep(pcie->rst_gpio, 1);
++	msleep(100);
++	gpiod_set_value_cansleep(pcie->rst_gpio, 0);
++	msleep(100);
++
++	dw_pcie_dbi_ro_wr_en(pci);
++
++	/* Target speed and lane count with the link down (set_rate). */
++	val = dw_pcie_readl_dbi(pci, cap + PCI_EXP_LNKCTL2);
++	val |= FIELD_PREP(PCI_EXP_LNKCTL2_TLS, 0x2);
++	dw_pcie_writel_dbi(pci, cap + PCI_EXP_LNKCTL2, val);
++
++	val = dw_pcie_readl_dbi(pci, cap + PCI_EXP_LNKCAP);
++	val |= FIELD_PREP(PCI_EXP_LNKCAP_SLS, 0x3);
++	dw_pcie_writel_dbi(pci, cap + PCI_EXP_LNKCAP, val);
++	dw_pcie_dbi_ro_wr_dis(pci);
++
++	val = dw_pcie_readl_dbi(pci, PCIE_PORT_LINK_CONTROL);
++	val &= ~PORT_LINK_MODE_MASK;
++	val |= PORT_LINK_MODE_1_LANES;
++	dw_pcie_writel_dbi(pci, PCIE_PORT_LINK_CONTROL, val);
++
++	val = dw_pcie_readl_dbi(pci, PCIE_LINK_WIDTH_SPEED_CONTROL);
++	val &= ~PORT_LOGIC_LINK_WIDTH_MASK;
++	val |= PORT_LOGIC_LINK_WIDTH_1_LANES;
++	dw_pcie_writel_dbi(pci, PCIE_LINK_WIDTH_SPEED_CONTROL, val);
++
++	/* Root-port configuration while the link is down (setup_rc). */
++	dw_pcie_writel_dbi(pci, PCI_BASE_ADDRESS_0, 0x00000004);
++	dw_pcie_writel_dbi(pci, PCI_BASE_ADDRESS_1, 0x00000000);
++
++	val = dw_pcie_readl_dbi(pci, PCI_INTERRUPT_LINE);
++	val &= 0xffff00ff;
++	val |= 0x00000100;
++	dw_pcie_writel_dbi(pci, PCI_INTERRUPT_LINE, val);
++
++	val = dw_pcie_readl_dbi(pci, PCI_PRIMARY_BUS);
++	val &= 0xff000000;
++	val |= 0x00ff0100;
++	dw_pcie_writel_dbi(pci, PCI_PRIMARY_BUS, val);
++
++	val = dw_pcie_readl_dbi(pci, PCI_COMMAND);
++	val &= 0xffff0000;
++	val |= PCI_COMMAND_IO | PCI_COMMAND_MEMORY |
++	       PCI_COMMAND_MASTER | PCI_COMMAND_SERR;
++	dw_pcie_writel_dbi(pci, PCI_COMMAND, val);
++
++	dw_pcie_writel_dbi(pci, PCI_BASE_ADDRESS_0, 0x00000000);
++
++	dw_pcie_writew_dbi(pci, PCI_CLASS_DEVICE, PCI_CLASS_BRIDGE_PCI);
++
++	val = dw_pcie_readl_dbi(pci, PCIE_LINK_WIDTH_SPEED_CONTROL);
++	val |= PORT_LOGIC_SPEED_CHANGE;
++	dw_pcie_writel_dbi(pci, PCIE_LINK_WIDTH_SPEED_CONTROL, val);
++
++	sun60i_a733_pcie_ltssm_enable(pcie);
++
++	for (i = 0; i < 20 && !sun60i_a733_pcie_link_up(pci); i++)
++		msleep(100);
++
++	/* Directed speed change after training. */
++	dw_pcie_dbi_ro_wr_en(pci);
++	val = dw_pcie_readl_dbi(pci, cap + PCI_EXP_LNKCTL2);
++	val |= FIELD_PREP(PCI_EXP_LNKCTL2_TLS, 0x2);
++	dw_pcie_writel_dbi(pci, cap + PCI_EXP_LNKCTL2, val);
++	dw_pcie_dbi_ro_wr_dis(pci);
++
++	val = dw_pcie_readl_dbi(pci, PCIE_LINK_WIDTH_SPEED_CONTROL);
++	val &= ~PORT_LOGIC_SPEED_CHANGE;
++	dw_pcie_writel_dbi(pci, PCIE_LINK_WIDTH_SPEED_CONTROL, val);
++	val |= PORT_LOGIC_SPEED_CHANGE;
++	dw_pcie_writel_dbi(pci, PCIE_LINK_WIDTH_SPEED_CONTROL, val);
++
++	for (i = 0; i < 20; i++) {
++		val = dw_pcie_readl_dbi(pci, PCIE_LINK_WIDTH_SPEED_CONTROL);
++		if (!(val & PORT_LOGIC_SPEED_CHANGE))
++			break;
++		msleep(1);
++	}
++
++	dev_info(pci->dev, "dbg: vendor bringup link=%d LNKSTA=%04x lwcs=%08x\n",
++		 sun60i_a733_pcie_link_up(pci),
++		 dw_pcie_readw_dbi(pci, cap + PCI_EXP_LNKSTA),
++		 dw_pcie_readl_dbi(pci, PCIE_LINK_WIDTH_SPEED_CONTROL));
++}
++
++static int sun60i_a733_pcie_hw_init(struct dw_pcie_rp *pp)
++{
++	struct dw_pcie *pci = to_dw_pcie_from_pp(pp);
++	struct sun60i_a733_pcie *pcie = to_sun60i_pcie(pci);
+ 	struct device *dev = pci->dev;
++	bool link_up;
+ 	int ret;
+ 
++	link_up = sun60i_a733_pcie_link_up(pci);
++
++	/*
++	 * After the boot-time data-path death the SMLH/RDLH status bits
++	 * stay latched "up" even though the LTSSM itself dropped back to
++	 * DETECT_QUIET and outbound TLPs never reach the endpoint.  In
++	 * that state only a full vendor bring-up gives us a chance, so
++	 * pretend the link is down and run the cold path regardless.
++	 */
++	dev_info(dev, "dbg: boot link_up=%d sii=%08x -> using vendor cold path\n",
++		 link_up, sun60i_a733_pcie_app_readl(pcie, SII_INT_STAS1));
++	link_up = false;
++	if (link_up) {
++		/*
++		 * Untouched-handover probe: the bootloader completed the
++		 * whole bring-up, so do not write anything until we know
++		 * whether pure reads work. Every power/reset/clock action,
++		 * including the PERST/LTSSM toggles, is skipped.
++		 */
++		dev_info(dev, "dbg: untouched handover pre SII=%08x ATU0 cr1=%08x cr2=%08x link_up=%d\n",
++			 sun60i_a733_pcie_app_readl(pcie, SII_INT_STAS1),
++			 dw_pcie_readl_dbi(pci, SUNXI_PCIE_ATU_OB_BASE + 0x00),
++			 dw_pcie_readl_dbi(pci, SUNXI_PCIE_ATU_OB_BASE + 0x04),
++			 link_up);
++
++		dev_info(dev, "dbg: app pgcfg=%08x awmisc=%08x armisc=%08x\n",
++			 sun60i_a733_pcie_app_readl(pcie, 0x04),
++			 sun60i_a733_pcie_app_readl(pcie, 0x200),
++			 sun60i_a733_pcie_app_readl(pcie, 0x220));
++
++		sun60i_a733_pcie_dump_link(pci, "pre");
++		sun60i_a733_pcie_dump_atu0(pci, "pre");
++		sun60i_a733_pcie_dump_cfg(dev, 0x20000000, "pre-cfg");
++		sun60i_a733_pcie_dump_cfg(dev, 0x21000000, "pre-io");
++		sun60i_a733_pcie_dump_cfg(dev, 0x22000000, "pre-mem");
++
++		msleep(100);
++		gpiod_set_value_cansleep(pcie->wake_gpio, 1);
++
++		return 0;
++	}
++
+ 	ret = devm_regulator_get_enable(dev, "vpcie3v3");
+ 	if (ret)
+ 		return dev_err_probe(dev, ret, "no pcie3v3-supply\n");
+@@ -249,17 +449,25 @@ static int sun60i_a733_pcie_hw_init(struct sun60i_a733_pcie *pcie)
+ 	if (ret)
+ 		goto err_assert_resets;
+ 
++	{
++		void __iomem *ccu = ioremap(0x2002000, 0x2000);
++		void __iomem *cfg = ioremap(0x20000000, 0x1000);
++
++		dev_info(dev, "dbg: ccu1384=%08x\n", readl(ccu + 0x1384));
++		dev_info(dev, "dbg: cfg read=%08x %08x\n",
++			 readl(cfg), readl(cfg + 4));
++		iounmap(cfg);
++		iounmap(ccu);
++	}
++
+ 	ret = phy_init(pcie->phy);
+ 	if (ret) {
+ 		dev_err_probe(dev, ret, "failed to init the PHY\n");
+ 		goto err_disable_clks;
+ 	}
++	pcie->phy_inited = true;
+ 
+-	/* Assert PERST#, wait, then release it. */
+-	gpiod_set_value_cansleep(pcie->rst_gpio, 1);
+-	msleep(100);
+-	gpiod_set_value_cansleep(pcie->rst_gpio, 0);
+-	gpiod_set_value_cansleep(pcie->wake_gpio, 1);
++	sun60i_a733_pcie_vendor_init(pcie);
+ 
+ 	return 0;
+ 
+@@ -267,13 +475,14 @@ static int sun60i_a733_pcie_hw_init(struct sun60i_a733_pcie *pcie)
+ 	clk_bulk_disable_unprepare(pcie->clk_cnt, pcie->clks);
+ err_assert_resets:
+ 	reset_control_bulk_assert(pcie->rst_cnt, pcie->rsts);
+-
+ 	return ret;
+ }
+-
+ static void sun60i_a733_pcie_hw_deinit(struct sun60i_a733_pcie *pcie)
+ {
+-	phy_exit(pcie->phy);
++	if (pcie->phy_inited) {
++		phy_exit(pcie->phy);
++		pcie->phy_inited = false;
++	}
+ 	clk_bulk_disable_unprepare(pcie->clk_cnt, pcie->clks);
+ 	reset_control_bulk_assert(pcie->rst_cnt, pcie->rsts);
+ }
+@@ -285,7 +494,7 @@ static int sun60i_a733_pcie_init(struct dw_pcie_rp *pp)
+ 	struct device_node *intc;
+ 	int ret;
+ 
+-	ret = sun60i_a733_pcie_hw_init(pcie);
++	ret = sun60i_a733_pcie_hw_init(pp);
+ 	if (ret)
+ 		return ret;
+ 
+@@ -332,11 +541,107 @@ static void sun60i_a733_pcie_deinit(struct dw_pcie_rp *pp)
+ 	sun60i_a733_pcie_hw_deinit(pcie);
+ }
+ 
++static void sun60i_a733_pcie_post_init(struct dw_pcie_rp *pp)
++{
++	struct dw_pcie *pci = to_dw_pcie_from_pp(pp);
++	struct sun60i_a733_pcie *pcie = to_sun60i_pcie(pci);
++	struct dw_pcie_ob_atu_cfg atu = { 0 };
++	struct pci_bus *bus;
++	void __iomem *mem;
++	int cap, i, rc;
++	u32 id = 0;
++
++	dev_info(pci->dev, "dbg: post SII=%08x LTSSM=%08x\n",
++		 sun60i_a733_pcie_app_readl(pcie, SII_INT_STAS1),
++		 sun60i_a733_pcie_app_readl(pcie, PCIE_LTSSM_ENABLE));
++
++	dev_info(pci->dev,
++		 "dbg: atu=%px size=%zu ob=%u ib=%u cfg0=%llx/%u pbo=%llx mls=%u lanes=%u skip=%d\n",
++		 pci->atu_base, pci->atu_size, pci->num_ob_windows,
++		 pci->num_ib_windows, (unsigned long long)pp->cfg0_base,
++		 pp->cfg0_size, (unsigned long long)pci->parent_bus_offset,
++		 pci->max_link_speed, pci->num_lanes, pp->skip_speed_change);
++
++	cap = dw_pcie_find_capability(pci, PCI_CAP_ID_EXP);
++	dev_info(pci->dev, "dbg: RP cap=%x LNKCAP=%08x LNKCTL2=%08x LNKSTA=%04x\n",
++		 cap, dw_pcie_readl_dbi(pci, cap + PCI_EXP_LNKCAP),
++		 dw_pcie_readl_dbi(pci, cap + PCI_EXP_LNKCTL2),
++		 dw_pcie_readw_dbi(pci, cap + PCI_EXP_LNKSTA));
++
++	for (i = 0; i < pci->num_ob_windows; i++) {
++		u32 b = SUNXI_PCIE_ATU_OB_BASE + i * 0x200;
++
++		dev_info(pci->dev,
++			 "dbg: atu%u lb=%08x ub=%08x lim=%08x lt=%08x ut=%08x cr1=%08x cr2=%08x\n",
++			 i, dw_pcie_readl_dbi(pci, b + 0x08),
++			 dw_pcie_readl_dbi(pci, b + 0x0c),
++			 dw_pcie_readl_dbi(pci, b + 0x10),
++			 dw_pcie_readl_dbi(pci, b + 0x14),
++			 dw_pcie_readl_dbi(pci, b + 0x18),
++			 dw_pcie_readl_dbi(pci, b + 0x00),
++			 dw_pcie_readl_dbi(pci, b + 0x04));
++	}
++
++	bus = pci_find_bus(0, 1);
++	if (!bus) {
++		dev_info(pci->dev, "dbg: bus 1 object absent\n");
++	} else {
++		rc = pci_bus_read_config_dword(bus, 0, 0, &id);
++		dev_info(pci->dev, "dbg: bus1 dev0 cfg rc=%d id=%08x\n", rc, id);
++	}
++
++	/* Memory window read: does the data path work at all? */
++	mem = ioremap(0x22000000, SZ_4K);
++	if (mem) {
++		dev_info(pci->dev, "dbg: mem22000000=%08x %08x\n",
++			 readl(mem), readl(mem + 4));
++		iounmap(mem);
++	}
++
++	mem = ioremap(0x22100000, SZ_4K);
++	if (mem) {
++		dev_info(pci->dev, "dbg: epbar0 22100000=%08x %08x\n",
++			 readl(mem), readl(mem + 16));
++		iounmap(mem);
++	}
++
++	dev_info(pci->dev, "dbg: dbi pmc=%08x plc=%08x lwcs=%08x cmd=%08x bus=%08x\n",
++		 dw_pcie_readl_dbi(pci, 0x070),
++		 dw_pcie_readl_dbi(pci, 0x710),
++		 dw_pcie_readl_dbi(pci, 0x80c),
++		 dw_pcie_readl_dbi(pci, 0x100),
++		 dw_pcie_readl_dbi(pci, 0x158));
++
++	/* Type 1 config TLP experiment, then restore the Type 0 window. */
++	memset(&atu, 0, sizeof(atu));
++	atu.parent_bus_addr = pp->cfg0_base - pci->parent_bus_offset;
++	atu.pci_addr = 1 << 24;
++	atu.size = pp->cfg0_size;
++
++	atu.type = PCIE_TLP_TYPE_CFG1_RDWR;
++	rc = dw_pcie_prog_outbound_atu(pci, &atu);
++	dev_info(pci->dev, "dbg: cfg1 rc=%d read=%08x\n", rc,
++		 readl(pp->va_cfg0_base));
++
++	atu.type = PCIE_TLP_TYPE_CFG0_RDWR;
++	rc = dw_pcie_prog_outbound_atu(pci, &atu);
++	dev_info(pci->dev, "dbg: cfg0 restore rc=%d read=%08x\n", rc,
++		 readl(pp->va_cfg0_base));
++
++	a733_snap_dump();
++
++}
++
+ static const struct dw_pcie_host_ops sun60i_a733_pcie_host_ops = {
+ 	.init		= sun60i_a733_pcie_init,
+ 	.deinit		= sun60i_a733_pcie_deinit,
++	.post_init	= sun60i_a733_pcie_post_init,
+ };
+ 
++/* dbg #74: silent snap ring buffer + index */
++char a733_snap_log[64][192];
++int a733_snap_log_idx;
++
+ static int sun60i_a733_pcie_resource_get(struct platform_device *pdev,
+ 					 struct sun60i_a733_pcie *pcie)
+ {
+@@ -400,12 +705,16 @@ static int sun60i_a733_pcie_probe(struct platform_device *pdev)
+ 	pcie->pci.ops = &sun60i_a733_pcie_ops;
+ 	pcie->pci.pp.ops = &sun60i_a733_pcie_host_ops;
+ 
++	a733_pcie_snap("x0");
++
+ 	ret = sun60i_a733_pcie_resource_get(pdev, pcie);
+ 	if (ret)
+ 		return ret;
+ 
+ 	platform_set_drvdata(pdev, pcie);
+ 
++	a733_pcie_snap("x1");
++
+ 	return dw_pcie_host_init(&pcie->pci.pp);
+ }
+ 
+diff --git a/drivers/phy/allwinner/phy-sun60i-a733-serdes.c b/drivers/phy/allwinner/phy-sun60i-a733-serdes.c
+index d942e689b..5ae5116c4 100644
+--- a/drivers/phy/allwinner/phy-sun60i-a733-serdes.c
++++ b/drivers/phy/allwinner/phy-sun60i-a733-serdes.c
+@@ -11,7 +11,10 @@
+  * in the combophy block.
+  */
+ 
++#include <linux/a733-snap.h>
+ #include <linux/clk.h>
++#include <linux/err.h>
++#include <linux/io.h>
+ #include <linux/iopoll.h>
+ #include <linux/kernel.h>
+ #include <linux/module.h>
+@@ -105,6 +108,16 @@ static void a733_serdes_pcie_internal_refclk_init(void __iomem *combo_top,
+ 	a733_serdes_phy_writew(phy, 0xa4, 0x4);
+ 	a733_serdes_phy_writew(phy, 0xd4, 0x4);
+ 
++	a733_serdes_phy_writew(phy, 0x1a4, 0x509);
++	a733_serdes_phy_writew(phy, 0x1b4, 0x509);
++	a733_serdes_phy_writew(phy, 0x1c4, 0x509);
++	a733_serdes_phy_writew(phy, 0x1a5, 0xf00);
++	a733_serdes_phy_writew(phy, 0x1b5, 0xf00);
++	a733_serdes_phy_writew(phy, 0x1c5, 0xf00);
++	a733_serdes_phy_writew(phy, 0x1a6, 0xf08);
++	a733_serdes_phy_writew(phy, 0x1b6, 0xf08);
++	a733_serdes_phy_writew(phy, 0x1c6, 0xf08);
++
+ 	a733_serdes_phy_writew(phy, 0x90, 0x180);
+ 	a733_serdes_phy_writew(phy, 0xa0, 0x133);
+ 	a733_serdes_phy_writew(phy, 0xd0, 0x133);
+@@ -183,6 +196,16 @@ static void a733_serdes_pcie_external_refclk_init(void __iomem *combo_top,
+ 	a733_serdes_phy_writew(phy, 0xa4, 0x4);
+ 	a733_serdes_phy_writew(phy, 0xd4, 0x4);
+ 
++	a733_serdes_phy_writew(phy, 0x1a4, 0x509);
++	a733_serdes_phy_writew(phy, 0x1b4, 0x509);
++	a733_serdes_phy_writew(phy, 0x1c4, 0x509);
++	a733_serdes_phy_writew(phy, 0x1a5, 0xf00);
++	a733_serdes_phy_writew(phy, 0x1b5, 0xf00);
++	a733_serdes_phy_writew(phy, 0x1c5, 0xf00);
++	a733_serdes_phy_writew(phy, 0x1a6, 0xf08);
++	a733_serdes_phy_writew(phy, 0x1b6, 0xf08);
++	a733_serdes_phy_writew(phy, 0x1c6, 0xf08);
++
+ 	a733_serdes_phy_writew(phy, 0x90, 0x64);
+ 	a733_serdes_phy_writew(phy, 0xa0, 0x50);
+ 	a733_serdes_phy_writew(phy, 0xd0, 0x50);
+@@ -246,6 +269,7 @@ static void a733_serdes_pcie_finish(void __iomem *combo_top, void __iomem *phy)
+ }
+ 
+ struct a733_serdes_pcie {
++	struct device		*dev;
+ 	struct phy		*phy;
+ 	void __iomem		*top_subsys;
+ 	void __iomem		*top_combo;
+@@ -282,9 +306,11 @@ static int a733_serdes_pcie_init(struct phy *phy)
+ 	if (ret)
+ 		goto err_assert_reset;
+ 
+-	ret = clk_prepare_enable(serdes->dcxo_clk);
+-	if (ret)
+-		goto err_disable_serdes_clk;
++	if (serdes->dcxo_clk) {
++		ret = clk_prepare_enable(serdes->dcxo_clk);
++		if (ret)
++			goto err_disable_serdes_clk;
++	}
+ 
+ 	val = readl(serdes->top_subsys + SUBSYS_PCIE_BGR);
+ 	writel(val | SUBSYS_PCIE_GATING, serdes->top_subsys + SUBSYS_PCIE_BGR);
+@@ -308,10 +334,20 @@ static int a733_serdes_pcie_init(struct phy *phy)
+ 
+ 	a733_serdes_pcie_finish(serdes->combo_top, serdes->combo_phy);
+ 
++	dev_info(serdes->dev,
++		 "pcie phy init done: refclk=%s gating=%08x pipe=%08x pma=%08x lane0=%08x lc1=%08x\n",
++		 serdes->ext_refclk ? "EXT" : "INT",
++		 readl(serdes->top_subsys + SUBSYS_PCIE_BGR),
++		 readl(serdes->top_combo + SUBSYS_COMB1_PIPE),
++		 readl(serdes->combo_top + 0x900),
++		 readl(serdes->combo_top + 0x100),
++		 readl(serdes->combo_top + 0x4));
++
+ 	return 0;
+ 
+ err_disable_dcxo_clk:
+-	clk_disable_unprepare(serdes->dcxo_clk);
++	if (serdes->dcxo_clk)
++		clk_disable_unprepare(serdes->dcxo_clk);
+ err_disable_serdes_clk:
+ 	clk_disable_unprepare(serdes->serdes_clk);
+ err_assert_reset:
+@@ -340,6 +376,7 @@ static const struct phy_ops a733_serdes_pcie_ops = {
+ 	.owner		= THIS_MODULE,
+ };
+ 
++
+ static int a733_serdes_pcie_probe(struct platform_device *pdev)
+ {
+ 	struct a733_serdes_pcie *serdes;
+@@ -351,6 +388,8 @@ static int a733_serdes_pcie_probe(struct platform_device *pdev)
+ 	if (!serdes)
+ 		return -ENOMEM;
+ 
++	serdes->dev = dev;
++
+ 	serdes->top_subsys = devm_platform_ioremap_resource(pdev, 0);
+ 	if (IS_ERR(serdes->top_subsys))
+ 		return PTR_ERR(serdes->top_subsys);
+@@ -372,7 +411,7 @@ static int a733_serdes_pcie_probe(struct platform_device *pdev)
+ 		return dev_err_probe(dev, PTR_ERR(serdes->serdes_clk),
+ 				     "failed to get serdes clock\n");
+ 
+-	serdes->dcxo_clk = devm_clk_get(dev, "dcxo-serdes1-clk");
++	serdes->dcxo_clk = devm_clk_get_optional(dev, "dcxo-serdes1-clk");
+ 	if (IS_ERR(serdes->dcxo_clk))
+ 		return dev_err_probe(dev, PTR_ERR(serdes->dcxo_clk),
+ 				     "failed to get serdes dcxo clock\n");
+@@ -402,6 +441,12 @@ static int a733_serdes_pcie_probe(struct platform_device *pdev)
+ 
+ 	provider = devm_of_phy_provider_register(dev, of_phy_simple_xlate);
+ 
++	a733_pcie_snap("s0");
++
++	dev_info(dev, "serdes probed: cfg=%lu Hz dcxo=%s\n",
++		 clk_get_rate(serdes->serdes_clk),
++		 serdes->dcxo_clk ? "present" : "absent");
++
+ 	return PTR_ERR_OR_ZERO(provider);
+ }
+ 
+diff --git a/drivers/pinctrl/sunxi/pinctrl-sun60i-a733-r.c b/drivers/pinctrl/sunxi/pinctrl-sun60i-a733-r.c
+index a6048f480..5303d05c1 100644
+--- a/drivers/pinctrl/sunxi/pinctrl-sun60i-a733-r.c
++++ b/drivers/pinctrl/sunxi/pinctrl-sun60i-a733-r.c
+@@ -6,6 +6,7 @@
+  */
+ 
+ #include <linux/module.h>
++#include <linux/a733-snap.h>
+ #include <linux/platform_device.h>
+ #include <linux/of.h>
+ #include <linux/of_device.h>
+@@ -31,10 +32,17 @@ static struct sunxi_pinctrl_desc a733_r_pinctrl_data = {
+ 
+ static int a733_r_pinctrl_probe(struct platform_device *pdev)
+ {
+-	return sunxi_pinctrl_dt_table_init(pdev, a733_r_nr_bank_pins,
+-					   a733_r_irq_bank_muxes,
+-					   &a733_r_pinctrl_data,
+-					   SUNXI_PINCTRL_NCAT2_REG_LAYOUT);
++	int ret;
++
++	a733_pcie_snap("pM");
++	/* dbg #65: probe re-enabled, mute moved into sunxi_pinctrl_probe */
++	ret = sunxi_pinctrl_dt_table_init(pdev, a733_r_nr_bank_pins,
++					  a733_r_irq_bank_muxes,
++					  &a733_r_pinctrl_data,
++					  SUNXI_PINCTRL_NCAT2_REG_LAYOUT);
++
++	a733_pcie_snap("p3");
++	return ret;
+ }
+ 
+ static const struct of_device_id a733_r_pinctrl_match[] = {
+diff --git a/drivers/pinctrl/sunxi/pinctrl-sunxi-dt.c b/drivers/pinctrl/sunxi/pinctrl-sunxi-dt.c
+index aeaf5534c..4f5f2afae 100644
+--- a/drivers/pinctrl/sunxi/pinctrl-sunxi-dt.c
++++ b/drivers/pinctrl/sunxi/pinctrl-sunxi-dt.c
+@@ -25,6 +25,7 @@
+  *						// array passed in
+  */
+ 
++#include <linux/a733-snap.h>
+ #include <linux/export.h>
+ #include <linux/of.h>
+ #include <linux/of_address.h>
+@@ -338,6 +339,7 @@ static void fill_pin_function(struct device *dev, struct device_node *node,
+  * and mux values for each mentioned pin.
+  * At the end hand over this structure to the actual sunxi pinctrl driver.
+  */
++
+ int sunxi_pinctrl_dt_table_init(struct platform_device *pdev,
+ 				const u8 *pins_per_bank,
+ 				const u8 *irq_bank_muxes,
+@@ -348,6 +350,8 @@ int sunxi_pinctrl_dt_table_init(struct platform_device *pdev,
+ 	struct sunxi_desc_pin *pins;
+ 	int ret, i;
+ 
++	a733_pcie_snap("t0");
++
+ 	pins = init_pins_table(&pdev->dev, pins_per_bank, desc);
+ 	if (IS_ERR(pins))
+ 		return PTR_ERR(pins);
+@@ -357,6 +361,8 @@ int sunxi_pinctrl_dt_table_init(struct platform_device *pdev,
+ 	if (ret)
+ 		return ret;
+ 
++	a733_pcie_snap("t1");
++
+ 	/*
+ 	 * Now iterate over all groups and add the respective function name
+ 	 * and mux values to each pin listed within.
+diff --git a/drivers/pinctrl/sunxi/pinctrl-sunxi.c b/drivers/pinctrl/sunxi/pinctrl-sunxi.c
+index bf4ec4665..181d02959 100644
+--- a/drivers/pinctrl/sunxi/pinctrl-sunxi.c
++++ b/drivers/pinctrl/sunxi/pinctrl-sunxi.c
+@@ -10,6 +10,7 @@
+  * warranty of any kind, whether express or implied.
+  */
+ 
++#include <linux/a733-snap.h>
+ #include <linux/clk.h>
+ #include <linux/export.h>
+ #include <linux/gpio/driver.h>
+@@ -1591,6 +1592,7 @@ static int sunxi_pinctrl_setup_debounce(struct sunxi_pinctrl *pctl,
+ 	return 0;
+ }
+ 
++
+ int sunxi_pinctrl_init_with_flags(struct platform_device *pdev,
+ 				  const struct sunxi_pinctrl_desc *desc,
+ 				  unsigned long flags)
+@@ -1603,6 +1605,8 @@ int sunxi_pinctrl_init_with_flags(struct platform_device *pdev,
+ 	int i, ret, last_pin, pin_idx, nbanks;
+ 	struct clk *clk;
+ 
++	a733_pcie_snap("p0");
++
+ 	pctl = devm_kzalloc_obj(&pdev->dev, *pctl);
+ 	if (!pctl)
+ 		return -ENOMEM;
+@@ -1655,6 +1659,8 @@ int sunxi_pinctrl_init_with_flags(struct platform_device *pdev,
+ 	if (IS_ERR(clk))
+ 		return PTR_ERR(clk);
+ 
++	a733_pcie_snap("pA");
++
+ 	/*
+ 	 * Seed the output latch shadow from the hardware so pins the
+ 	 * bootloader left in output mode keep their state; see
+@@ -1761,6 +1767,8 @@ int sunxi_pinctrl_init_with_flags(struct platform_device *pdev,
+ 			goto gpiochip_error;
+ 	}
+ 
++	a733_pcie_snap("pB");
++
+ 	pctl->irq = devm_kzalloc_objs(&pdev->dev, *pctl->irq,
+ 				      pctl->desc->irq_banks);
+ 	if (!pctl->irq) {
+@@ -1797,20 +1805,42 @@ int sunxi_pinctrl_init_with_flags(struct platform_device *pdev,
+ 
+ 	for (i = 0; i < pctl->desc->irq_banks; i++) {
+ 		/* Mask and clear all IRQs before registering a handler */
+-		writel(0, pctl->membase +
+-			  sunxi_irq_ctrl_reg_from_bank(pctl, i));
+-		writel(0xffffffff,
+-		       pctl->membase +
+-		       sunxi_irq_status_reg_from_bank(pctl, i));
+-
++		/* dbg #77: skip IRQ_CTRL writes for r-side entirely -
++		 * #75 (both writes, no chained) died, #76 (PL write, chain on)
++		 * died - test: no regular writes at all, chain kept */
++		if (!of_device_is_compatible(node, "allwinner,sun60i-a733-r-pinctrl"))
++			writel(0, pctl->membase +
++				  sunxi_irq_ctrl_reg_from_bank(pctl, i));
++
++		a733_pcie_snap("pC");
++
++		/* dbg #70/#72: don't touch R-EINT STATUS regs at all - both the
++		 * 0xffffffff blast (#69) and even a plain read (#70/71) kill the
++		 * PCIe outbound TLP fabric path (poll: cfg 2263126f->ffffffff
++		 * right after readl(IRQ_STATUS(PL))) */
++		if (!of_device_is_compatible(node, "allwinner,sun60i-a733-r-pinctrl"))
++			writel(0xffffffff,
++			       pctl->membase +
++			       sunxi_irq_status_reg_from_bank(pctl, i));
++
++		a733_pcie_snap("pD");
++
++		/* dbg #75/#76: chained install and PM IRQ_CTRL exonerated */
+ 		irq_set_chained_handler_and_data(pctl->irq[i],
+ 						 sunxi_pinctrl_irq_handler,
+ 						 pctl);
++
++		a733_pcie_snap("pE");
+ 	}
+ 
+ 	sunxi_pinctrl_setup_debounce(pctl, node);
+ 
+-	dev_info(&pdev->dev, "initialized sunXi PIO driver\n");
++	a733_pcie_snap("p1");
++
++	dev_dbg(&pdev->dev, "initialized sunXi PIO driver\n");
++	a733_pcie_snap("pG");
++
++	a733_pcie_snap("p2");
+ 
+ 	return 0;
+ 
+diff --git a/drivers/pmdomain/sunxi/sun55i-pck600.c b/drivers/pmdomain/sunxi/sun55i-pck600.c
+index 81c3b18a3..6de6eeac7 100644
+--- a/drivers/pmdomain/sunxi/sun55i-pck600.c
++++ b/drivers/pmdomain/sunxi/sun55i-pck600.c
+@@ -13,6 +13,7 @@
+  * - "Arm Power Policy Unit" architecture specification (DEN0051E)
+  */
+ 
++#include <linux/a733-snap.h>
+ #include <linux/bitfield.h>
+ #include <linux/clk.h>
+ #include <linux/container_of.h>
+@@ -126,6 +127,7 @@ static void sunxi_pck600_pd_setup(struct sunxi_pck600_pd *pd,
+ 	writel(desc->off2on_delay, pd->base + desc->off2on_delay_offset);
+ }
+ 
++
+ static int sunxi_pck600_probe(struct platform_device *pdev)
+ {
+ 	struct device *dev = &pdev->dev;
+@@ -157,6 +159,8 @@ static int sunxi_pck600_probe(struct platform_device *pdev)
+ 	if (IS_ERR(base))
+ 		return PTR_ERR(base);
+ 
++	a733_pcie_snap("g0");
++
+ 	if (desc->has_rst_clk) {
+ 		rst = devm_reset_control_get_exclusive_released(dev, NULL);
+ 		if (IS_ERR(rst))
+@@ -193,6 +197,8 @@ static int sunxi_pck600_probe(struct platform_device *pdev)
+ 		goto err_remove_pds;
+ 	}
+ 
++	a733_pcie_snap("g1");
++
+ 	return 0;
+ 
+ err_remove_pds:
+diff --git a/include/linux/a733-snap.h b/include/linux/a733-snap.h
+new file mode 100644
+index 000000000..17e0103c4
+--- /dev/null
++++ b/include/linux/a733-snap.h
+@@ -0,0 +1,66 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * A733 bring-up debug: read-only snapshot of the PCIe datapath.
++ * cfg/io/mem are the CPU windows the bootloader left alive; lnksta/sii/lcv
++ * come from the controller; the trailing columns sample CCU gates.
++ */
++
++#ifndef _LINUX_A733_SNAP_H
++#define _LINUX_A733_SNAP_H
++
++#include <linux/io.h>
++#include <linux/err.h>
++#include <linux/kernel.h>
++
++void clk_pcie_watch(const char *cmd, const char *name);
++
++/* dbg #74: silent snap - no UART output, lines go to a rotating buffer */
++#define A733_SNAP_LOG_N 64
++extern char a733_snap_log[A733_SNAP_LOG_N][192];
++extern int a733_snap_log_idx;
++
++static inline void a733_snap_dump(void)
++{
++	int i;
++
++	for (i = 0; i < A733_SNAP_LOG_N && i <= a733_snap_log_idx; i++)
++		pr_emerg("%s\n", a733_snap_log[i]);
++}
++
++static inline void a733_pcie_snap(const char *tag)
++{
++	/* dbg #73: cache the mappings - 6x ioremap/iounmap per snap was
++	 * churn inside the death window */
++	static void __iomem *dbi, *app, *cfg, *ioa, *mem, *ccu;
++
++	if (!dbi) {
++		dbi = ioremap(0x6000000, 0x200);
++		app = ioremap(0x6400000, 0x2000);
++		cfg = ioremap(0x20000000, 0x1000);
++		ioa = ioremap(0x21000000, 0x1000);
++		mem = ioremap(0x22000000, 0x1000);
++		ccu = ioremap(0x2002000, 0x3000);
++	}
++
++	if (a733_snap_log_idx < A733_SNAP_LOG_N)
++		a733_snap_log_idx++;
++
++	snprintf(a733_snap_log[a733_snap_log_idx % A733_SNAP_LOG_N],
++		 sizeof(a733_snap_log[0]),
++		 "a733-snap[%s]: cfg=%08x io=%08x mem=%08x lnksta=%04x sii=%08x lcv=%08x aux=%08x slv=%08x rst=%08x sfc=%08x gb=%08x gm=%08x",
++		 tag,
++		 cfg ? readl(cfg) : 0,
++		 ioa ? readl(ioa) : 0,
++		 mem ? readl(mem) : 0,
++		 dbi ? readw(dbi + 0x8a) : 0,
++		 app ? readl(app + 0xe0c) : 0,
++		 dbi ? readl(dbi + 0x80c) : 0,
++		 ccu ? readl(ccu + 0x1380) : 0,
++		 ccu ? readl(ccu + 0x1384) : 0,
++		 ccu ? readl(ccu + 0x138c) : 0,
++		 ccu ? readl(ccu + 0x13c0) : 0,
++		 ccu ? readl(ccu + 0x5c0) : 0,
++		 ccu ? readl(ccu + 0x5e0) : 0);
++}
++
++#endif
+diff --git a/init/do_mounts.c b/init/do_mounts.c
+index b088021b1..c3d753419 100644
+--- a/init/do_mounts.c
++++ b/init/do_mounts.c
+@@ -6,6 +6,7 @@
+ #include <linux/tty.h>
+ #include <linux/suspend.h>
+ #include <linux/root_dev.h>
++#include <asm/fixmap.h>
+ #include <linux/security.h>
+ #include <linux/delay.h>
+ #include <linux/mount.h>
+@@ -454,8 +455,24 @@ static dev_t __init parse_root_device(char *root_device_name)
+ /*
+  * Prepare the namespace - decide what/where to mount, load ramdisks, etc.
+  */
++/* A733 debug: raw fixmap UART marker, usable after initmem is freed */
++static void a733_mark(const char *tag)
++{
++	volatile u32 *base = (volatile u32 *)__fix_to_virt(FIX_EARLYCON_MEM_BASE);
++	const char *p = tag;
++	int n;
++
++	while (*p) {
++		n = 100000;
++		while (n-- && !(base[5] & 0x20))
++			cpu_relax();
++		base[0] = (u32)*p++;
++	}
++}
++
+ void __init prepare_namespace(void)
+ {
++	a733_mark("J3");
+ 	if (root_delay) {
+ 		printk(KERN_INFO "Waiting %d sec before mounting root device...\n",
+ 		       root_delay);
+@@ -470,17 +487,22 @@ void __init prepare_namespace(void)
+ 	 * for the touchpad of a laptop to initialize.
+ 	 */
+ 	wait_for_device_probe();
++	a733_mark("e");
+ 
+ 	md_run_setup();
++	a733_mark("f");
+ 
+ 	if (saved_root_name[0])
+ 		ROOT_DEV = parse_root_device(saved_root_name);
+ 
+ 	initrd_load();
++	a733_mark("g");
+ 
+ 	if (root_wait)
+ 		wait_for_root(saved_root_name);
++	a733_mark("h");
+ 	mount_root(saved_root_name);
++	a733_mark("J4");
+ 	devtmpfs_mount();
+ 
+ 	if (init_pivot_root(".", ".")) {
+diff --git a/init/main.c b/init/main.c
+index 27ce0db7f..93090d2b1 100644
+--- a/init/main.c
++++ b/init/main.c
+@@ -12,6 +12,7 @@
+ 
+ #define DEBUG		/* Enable initcall_debug */
+ 
++#include <linux/a733-snap.h>
+ #include <linux/types.h>
+ #include <linux/export.h>
+ #include <linux/extable.h>
+@@ -73,6 +74,7 @@
+ #include <linux/pid_namespace.h>
+ #include <linux/device/driver.h>
+ #include <linux/kthread.h>
++#include <linux/sched/debug.h>
+ #include <linux/sched.h>
+ #include <linux/sched/init.h>
+ #include <linux/signal.h>
+@@ -116,6 +118,7 @@
+ #include <asm/sections.h>
+ #include <asm/cacheflush.h>
+ #include <asm/fixmap.h>
++#include <asm/sysreg.h>
+ 
+ #define CREATE_TRACE_POINTS
+ #include <trace/events/initcall.h>
+@@ -1045,15 +1048,51 @@ static void __init print_kernel_cmdline(const char *cmdline)
+ /* A733 debug: direct UART0 trace while the idmap is still installed */
+ static noinline void __init a733_putc(char c)
+ {
++	int n = 100000;
++
++	while (n-- && !(*(volatile u32 *)0x02500014 & 0x20))
++		cpu_relax();
+ 	*(volatile u32 *)0x02500000 = (u32)c;
+ }
+ 
+ /* A733 debug: same UART through the permanent fixmap (survives idmap removal) */
+-static noinline void __init a733_fix_putc(char c)
++/* dbg #80: not __init - called post-free_initmem via a733_ts; #81's IABT hit
++ * a733_fix_putc+0x0 after the __init pages were freed */
++static noinline void a733_fix_putc(char c)
++{
++	volatile u32 *base = (volatile u32 *)__fix_to_virt(FIX_EARLYCON_MEM_BASE);
++	int n = 100000;
++
++	while (n-- && !(base[5] & 0x20))
++		cpu_relax();
++	base[0] = (u32)c;
++}
++
++/* A733 debug: raw marker with the 24 MHz counter low 32 bits, e.g. T0:01234567; */
++/* dbg #80: not __init - kernel_init calls it after free_initmem (J6/J7) and
++ * #79's IABT panic proved the __init pages were already freed */
++static noinline void a733_ts(char tag)
+ {
+-	*(volatile u32 *)__fix_to_virt(FIX_EARLYCON_MEM_BASE) = (u32)c;
++	u32 t = (u32)read_sysreg(cntvct_el0);
++	int i;
++
++	a733_fix_putc(tag);
++	a733_fix_putc(':');
++	for (i = 28; i >= 0; i -= 4) {
++		unsigned int d = (t >> i) & 0xf;
++
++		a733_fix_putc(d < 10 ? '0' + d : 'a' + d - 10);
++	}
++	a733_fix_putc(';');
+ }
+ 
++
++
++/*
++ * A733 liveness test (diagnostic): if the scheduler still runs, the board
++ * restarts by itself 10 s after this thread starts. This distinguishes a
++ * silent UART from a dead machine, since a reboot is visible without it.
++ */
+ asmlinkage __visible __init __no_sanitize_address __noreturn __no_stack_protector
+ void start_kernel(void)
+ {
+@@ -1262,6 +1301,8 @@ void start_kernel(void)
+ 	arch_post_acpi_subsys_init();
+ 	kcsan_init();
+ 
++	a733_pcie_snap("k");
++
+ 	/* Do the rest non-__init'ed, we're now alive */
+ 	rest_init();
+ 
+@@ -1627,20 +1668,111 @@ void __weak free_initmem(void)
+ 	free_initmem_default(POISON_FREE_INITMEM);
+ }
+ 
++/*
++ * A733 liveness poller: watches the PCIe CPU config window at ~2 ms cadence
++ * from the very start and reports the transition moment, the context
++ * (irq/preempt/cpu) and a rapid re-read burst so the timing of the datapath
++ * death is precise.
++ */
++
++static void __iomem *a733_pol_cfg;
++static void __iomem *a733_pol_io;
++static void __iomem *a733_pol_mem;
++static void __iomem *a733_pol_dbi;
++static void __iomem *a733_pol_app;
++
++static int a733_pol_die_count;
++
++static int a733_pol_fn(void *arg)
++{
++	unsigned int last = 0, lc_last = 0, si_last = 0;
++	int first = 1, k;
++
++	a733_pol_cfg = ioremap(0x20000000, 0x1000);
++	a733_pol_io = ioremap(0x21000000, 0x1000);
++	a733_pol_mem = ioremap(0x22000000, 0x1000);
++	a733_pol_dbi = ioremap(0x6000000, 0x200);
++	a733_pol_app = ioremap(0x6400000, 0x2000);
++
++	for (;;) {
++		unsigned int v, lc, si;
++
++		if (kthread_should_stop())
++			break;
++
++		v = readl(a733_pol_cfg);
++		lc = readl(a733_pol_dbi + 0x80c);
++		si = readl(a733_pol_app + 0xe0c);
++
++		if (first) {
++			last = v;
++			lc_last = lc;
++			si_last = si;
++			first = 0;
++			pr_emerg("a733-poll: first cfg=%08x lc=%08x si=%08x\n", v, lc, si);
++		}
++
++		if (v != last) {
++			pr_emerg("a733-pol: cfg %08x -> %08x (cpu=%d)\n",
++				 last, v, smp_processor_id());
++
++			/* dbg #79: task-dump removed - in #77/#78 the kernel
++			 * hung mid-dump at ~3.39 with show_state_filter
++			 * interleaving the snap prints */
++			a733_pol_die_count++;
++
++			a733_pcie_snap("pol");
++
++			for (k = 0; k < 8; k++) {
++				msleep(3);
++				pr_emerg("a733-pol: re[%d] cfg=%08x io=%08x mem=%08x\n", k,
++					 readl(a733_pol_cfg), readl(a733_pol_io),
++					 readl(a733_pol_mem));
++			}
++			last = v;
++		}
++		if (lc != lc_last || si != si_last) {
++			pr_emerg("a733-pol: lc=%08x si=%08x (was %08x %08x)\n",
++				 lc, si, lc_last, si_last);
++			lc_last = lc;
++			si_last = si;
++		}
++
++		usleep_range(150, 350);
++	}
++
++	return 0;
++}
++
++static noinline void __init a733_pol_start(void)
++{
++	struct task_struct *p;
++
++	p = kthread_run(a733_pol_fn, NULL, "a733-pol");
++	if (IS_ERR(p))
++		pr_emerg("a733-poll: start failed %ld\n", PTR_ERR(p));
++	else
++		pr_emerg("a733-poll: started\n");
++}
++
+ static int __ref kernel_init(void *unused)
+ {
+ 	int ret;
+ 
+ 	init_userspace_fs();
+ 
++	a733_pol_start();
++
+ 	/*
+ 	 * Wait until kthreadd is all set-up.
+ 	 */
+ 	wait_for_completion(&kthreadd_done);
+ 
+ 	kernel_init_freeable();
++	a733_ts('J'); a733_ts('2');
+ 	/* need to finish all async __init code before freeing the memory */
+ 	async_synchronize_full();
++	a733_ts('J'); a733_ts('5');
+ 
+ 	system_state = SYSTEM_FREEING_INITMEM;
+ 	kprobe_free_init_mem();
+@@ -1649,6 +1781,7 @@ static int __ref kernel_init(void *unused)
+ 	exit_boot_config();
+ 	free_initmem();
+ 	mark_readonly();
++	a733_ts('J'); a733_ts('6');
+ 
+ 	/*
+ 	 * Kernel mappings are now finalized - update the userspace page-table
+@@ -1662,6 +1795,7 @@ static int __ref kernel_init(void *unused)
+ 	rcu_end_inkernel_boot();
+ 
+ 	do_sysctl_args();
++	a733_ts('J'); a733_ts('7');
+ 
+ 	if (ramdisk_execute_command) {
+ 		ret = run_init_process(ramdisk_execute_command);
+@@ -1731,17 +1865,22 @@ static noinline void __init kernel_init_freeable(void)
+ 
+ 	rcu_assign_pointer(cad_pid, get_pid(task_pid(current)));
+ 
++	a733_ts('U'); a733_ts('0');
+ 	smp_prepare_cpus(setup_max_cpus);
++	a733_ts('U'); a733_ts('1');
+ 
+ 	workqueue_init();
+ 
+ 	init_mm_internals();
+ 
+ 	do_pre_smp_initcalls();
++	a733_ts('U'); a733_ts('2');
+ 	lockup_detector_init();
+ 
+ 	smp_init();
++	a733_ts('U'); a733_ts('3');
+ 	sched_init_smp();
++	a733_ts('U'); a733_ts('4');
+ 
+ 	workqueue_init_topology();
+ 	async_init();
+@@ -1749,11 +1888,15 @@ static noinline void __init kernel_init_freeable(void)
+ 	page_alloc_init_late();
+ 
+ 	do_basic_setup();
++	a733_ts('J'); a733_ts('1');
+ 
+ 	kunit_run_all_tests();
++	a733_ts('a');
+ 
+ 	wait_for_initramfs();
++	a733_ts('b');
+ 	console_on_rootfs();
++	a733_ts('c');
+ 
+ 	/*
+ 	 * check if there is an early userspace init.  If yes, let it do all
+@@ -1761,6 +1904,7 @@ static noinline void __init kernel_init_freeable(void)
+ 	 */
+ 	int ramdisk_command_access;
+ 	ramdisk_command_access = init_eaccess(ramdisk_execute_command);
++	a733_ts('d');
+ 	if (ramdisk_command_access != 0) {
+ 		if (ramdisk_execute_command_set)
+ 			pr_warn("check access for rdinit=%s failed: %i, ignoring\n",

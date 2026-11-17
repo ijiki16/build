@@ -1,0 +1,112 @@
+From 47aa9c1ec77498b66e49a2b957f338b74a0f97b1 Mon Sep 17 00:00:00 2001
+From: rebase <rebase@localhost>
+Date: Tue, 17 Nov 2026 15:29:22 +0000
+Subject: [PATCH 02/28] pinctrl: sunxi: Add support for the Allwinner A733
+ R-PIO
+
+The A733 uses a bank layout with 0x80 byte bank stride starting at
+offset 0x80, dlevel fields 4 bit wide, pull registers at offset 0x30
+and dedicated IRQ register blocks in the upper part of each bank's
+space (CFG + 0x40 .. 0x58, implicit stride 0x80). Add this as a new
+SUNXI_PINCTRL_A733_LAYOUT variant, with per-controller IRQ register
+bases and strides now carried in the sunxi_pinctrl struct instead of
+hardcoded register constants.
+
+The A733 PIO uses the PIO_POW_MOD_SEL/CTL at 0x40/0x48 (like other
+chips, non-inverted, so BIAS_VOLTAGE_PIO_POW_MODE_CTL applies).
+
+The R-PIO (PL/PM banks) uses the existing D1 register layout.
+
+[rebase onto 7.4-rc3+: the main A733 PIO driver, its NCAT3 core layout
+ and the shared binding are upstream now; only the R-PIO driver remains,
+ with SUNXI_PINCTRL_NEW_REG_LAYOUT renamed to NCAT2_REG_LAYOUT (same bit).]
+---
+ drivers/pinctrl/sunxi/Kconfig                 |  5 ++
+ drivers/pinctrl/sunxi/Makefile                |  1 +
+ drivers/pinctrl/sunxi/pinctrl-sun60i-a733-r.c | 52 +++++++++++++++++++
+ 3 files changed, 58 insertions(+)
+ create mode 100644 drivers/pinctrl/sunxi/pinctrl-sun60i-a733-r.c
+
+diff --git a/drivers/pinctrl/sunxi/Kconfig b/drivers/pinctrl/sunxi/Kconfig
+index 831bb1dc9..42a13b74c 100644
+--- a/drivers/pinctrl/sunxi/Kconfig
++++ b/drivers/pinctrl/sunxi/Kconfig
+@@ -146,4 +146,9 @@ config PINCTRL_SUN60I_A733
+ 	default ARM64 && ARCH_SUNXI
+ 	select PINCTRL_SUNXI
+ 
++config PINCTRL_SUN60I_A733_R
++	bool "Support for the Allwinner A733 R-PIO"
++	default ARM64 && ARCH_SUNXI
++	select PINCTRL_SUNXI
++
+ endif
+diff --git a/drivers/pinctrl/sunxi/Makefile b/drivers/pinctrl/sunxi/Makefile
+index 3658c9d06..3658825b8 100644
+--- a/drivers/pinctrl/sunxi/Makefile
++++ b/drivers/pinctrl/sunxi/Makefile
+@@ -30,5 +30,6 @@ obj-$(CONFIG_PINCTRL_SUN50I_H616_R)	+= pinctrl-sun50i-h616-r.o
+ obj-$(CONFIG_PINCTRL_SUN55I_A523)	+= pinctrl-sun55i-a523.o
+ obj-$(CONFIG_PINCTRL_SUN55I_A523_R)	+= pinctrl-sun55i-a523-r.o
+ obj-$(CONFIG_PINCTRL_SUN60I_A733)	+= pinctrl-sun60i-a733.o
++obj-$(CONFIG_PINCTRL_SUN60I_A733_R)	+= pinctrl-sun60i-a733-r.o
+ obj-$(CONFIG_PINCTRL_SUN9I_A80)		+= pinctrl-sun9i-a80.o
+ obj-$(CONFIG_PINCTRL_SUN9I_A80_R)	+= pinctrl-sun9i-a80-r.o
+diff --git a/drivers/pinctrl/sunxi/pinctrl-sun60i-a733-r.c b/drivers/pinctrl/sunxi/pinctrl-sun60i-a733-r.c
+new file mode 100644
+index 000000000..a6048f480
+--- /dev/null
++++ b/drivers/pinctrl/sunxi/pinctrl-sun60i-a733-r.c
+@@ -0,0 +1,52 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Allwinner A733 SoC r-pinctrl driver.
++ *
++ * Copyright (C) 2025 Orange Pi 4 Pro mainline bring-up
++ */
++
++#include <linux/module.h>
++#include <linux/platform_device.h>
++#include <linux/of.h>
++#include <linux/of_device.h>
++#include <linux/pinctrl/pinctrl.h>
++
++#include "pinctrl-sunxi.h"
++
++static const u8 a733_r_nr_bank_pins[SUNXI_PINCTRL_MAX_BANKS] =
++/*	  PL  PM */
++	{ 14,  6 };
++
++static const unsigned int a733_r_irq_bank_map[] = { 0, 1 };
++
++static const u8 a733_r_irq_bank_muxes[SUNXI_PINCTRL_MAX_BANKS] =
++/*	  PL  PM */
++	{ 14, 14 };
++
++static struct sunxi_pinctrl_desc a733_r_pinctrl_data = {
++	.irq_banks = ARRAY_SIZE(a733_r_irq_bank_map),
++	.irq_bank_map = a733_r_irq_bank_map,
++	.pin_base = PL_BASE,
++};
++
++static int a733_r_pinctrl_probe(struct platform_device *pdev)
++{
++	return sunxi_pinctrl_dt_table_init(pdev, a733_r_nr_bank_pins,
++					   a733_r_irq_bank_muxes,
++					   &a733_r_pinctrl_data,
++					   SUNXI_PINCTRL_NCAT2_REG_LAYOUT);
++}
++
++static const struct of_device_id a733_r_pinctrl_match[] = {
++	{ .compatible = "allwinner,sun60i-a733-r-pinctrl", },
++	{}
++};
++
++static struct platform_driver a733_r_pinctrl_driver = {
++	.probe	= a733_r_pinctrl_probe,
++	.driver	= {
++		.name		= "sun60i-a733-r-pinctrl",
++		.of_match_table	= a733_r_pinctrl_match,
++	},
++};
++builtin_platform_driver(a733_r_pinctrl_driver);

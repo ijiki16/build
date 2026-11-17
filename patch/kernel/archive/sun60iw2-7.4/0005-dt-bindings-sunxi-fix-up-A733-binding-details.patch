@@ -1,0 +1,457 @@
+From 3d37ecc31ec612077facbaa3da9eb23b762a9c46 Mon Sep 17 00:00:00 2001
+From: rebase <rebase@localhost>
+Date: Tue, 17 Nov 2026 15:29:59 +0000
+Subject: [PATCH 05/28] dt-bindings: sunxi: fix up A733 binding details
+
+- declare clocks/clock-names at the top level of the CCU binding so
+  additionalProperties: false works as intended
+- the A733 PIO has ten interrupt banks, not eleven
+- the A733 RTC has a single interrupt and is registered without a
+  fallback compatible
+- the A733 watchdog takes a single clock input
+- register the Orange Pi 4 Pro board compatible and extend the
+  Maintainers file pattern to sun60i/sun30i
+
+[rebase onto 7.4-rc3+: the A733 pinctrl binding is now the shared upstream
+ allwinner,sun55i-a523-pinctrl.yaml; its fix (main PIO has 10 IRQ banks,
+ matching the driver irq_banks = 10) is carried there instead.]
+---
+ .../devicetree/bindings/arm/sunxi.yaml        |  5 +
+ .../clock/allwinner,sun60i-a733-ccu.yaml      | 99 +++++++++----------
+ .../allwinner,sun55i-a523-pinctrl.yaml        | 15 ++-
+ .../bindings/rtc/allwinner,sun6i-a31-rtc.yaml | 30 ++++++
+ .../thermal/allwinner,sun8i-a83t-ths.yaml     | 22 ++++-
+ .../watchdog/allwinner,sun4i-a10-wdt.yaml     | 79 ++++++++-------
+ MAINTAINERS                                   |  2 +-
+ .../arm64/boot/dts/allwinner/sun60i-a733.dtsi |  1 +
+ 8 files changed, 161 insertions(+), 92 deletions(-)
+
+diff --git a/Documentation/devicetree/bindings/arm/sunxi.yaml b/Documentation/devicetree/bindings/arm/sunxi.yaml
+index 28437c47a..6257870e2 100644
+--- a/Documentation/devicetree/bindings/arm/sunxi.yaml
++++ b/Documentation/devicetree/bindings/arm/sunxi.yaml
+@@ -1023,6 +1023,11 @@ properties:
+           - const: xunlong,orangepi-4a
+           - const: allwinner,sun55i-t527
+ 
++      - description: Xunlong OrangePi 4 Pro
++        items:
++          - const: xunlong,orangepi-4-pro
++          - const: allwinner,sun60i-a733
++
+       - description: Xunlong OrangePi Lite
+         items:
+           - const: xunlong,orangepi-lite
+diff --git a/Documentation/devicetree/bindings/clock/allwinner,sun60i-a733-ccu.yaml b/Documentation/devicetree/bindings/clock/allwinner,sun60i-a733-ccu.yaml
+index c2ff84a65..e608c564e 100644
+--- a/Documentation/devicetree/bindings/clock/allwinner,sun60i-a733-ccu.yaml
++++ b/Documentation/devicetree/bindings/clock/allwinner,sun60i-a733-ccu.yaml
+@@ -26,44 +26,20 @@ properties:
+     maxItems: 1
+ 
+   clocks:
+-    minItems: 4
+-    maxItems: 9
++    minItems: 1
++    maxItems: 3
+ 
+   clock-names:
+-    minItems: 4
+-    maxItems: 9
++    minItems: 1
++    maxItems: 3
+ 
+ required:
+   - "#clock-cells"
+   - "#reset-cells"
+   - compatible
+   - reg
+-  - clocks
+-  - clock-names
+ 
+ allOf:
+-  - if:
+-      properties:
+-        compatible:
+-          enum:
+-            - allwinner,sun60i-a733-ccu
+-
+-    then:
+-      properties:
+-        clocks:
+-          items:
+-            - description: High Frequency Oscillator (usually at 24MHz)
+-            - description: Low Frequency Oscillator (usually at 32kHz)
+-            - description: Internal Oscillator
+-            - description: Low Frequency Oscillator fanout
+-
+-        clock-names:
+-          items:
+-            - const: hosc
+-            - const: losc
+-            - const: iosc
+-            - const: losc-fanout
+-
+   - if:
+       properties:
+         compatible:
+@@ -73,28 +49,15 @@ allOf:
+     then:
+       properties:
+         clocks:
+-          items:
+-            - description: High Frequency Oscillator (usually at 24MHz)
+-            - description: Low Frequency Oscillator (usually at 32kHz)
+-            - description: Internal Oscillator
+-            - description: Audio PLL (4x)
+-            - description: Peripherals PLL 0 (300 MHz output)
+-            - description: DSP module clock
+-            - description: MBUS clock
+-            - description: PRCM AHB clock
+-            - description: PRCM APB0 clock
++          maxItems: 1
+ 
+         clock-names:
+           items:
+             - const: hosc
+-            - const: losc
+-            - const: iosc
+-            - const: pll-audio0-4x
+-            - const: pll-periph0-300m
+-            - const: dsp
+-            - const: mbus
+-            - const: r-ahb
+-            - const: r-apb0
++
++      required:
++        - clocks
++        - clock-names
+ 
+   - if:
+       properties:
+@@ -105,30 +68,62 @@ allOf:
+     then:
+       properties:
+         clocks:
++          minItems: 3
++          maxItems: 3
+           items:
+             - description: High Frequency Oscillator (usually at 24MHz)
+             - description: Low Frequency Oscillator (usually at 32kHz)
+             - description: Internal Oscillator
+-            - description: Peripherals PLL
+-            - description: Audio PLL
+ 
+         clock-names:
++          minItems: 3
++          maxItems: 3
+           items:
+             - const: hosc
+             - const: losc
+             - const: iosc
+-            - const: pll-periph
+-            - const: pll-audio
++
++      required:
++        - clocks
++        - clock-names
+ 
+ additionalProperties: false
+ 
+ examples:
+   - |
++    #include <dt-bindings/clock/sun6i-rtc.h>
++    #include <dt-bindings/clock/sun60i-a733-r-ccu.h>
++
++    rtc@7090000 {
++        compatible = "allwinner,sun60i-a733-rtc";
++        reg = <0x07090000 0x400>;
++        interrupts = <110 157 4>;
++        clocks = <&r_ccu CLK_RTC>, <&osc24M>, <&r_ccu CLK_R_AHB>;
++        clock-names = "bus", "hosc", "ahb";
++        #clock-cells = <1>;
++    };
++
+     clock-controller@2002000 {
+         compatible = "allwinner,sun60i-a733-ccu";
+         reg = <0x02002000 0x2000>;
+-        clocks = <&osc24M>, <&osc32k>, <&iosc>, <&rtc 0>;
+-        clock-names = "hosc", "losc", "iosc", "losc-fanout";
++        #clock-cells = <1>;
++        #reset-cells = <1>;
++    };
++
++    clock-controller@8870000 {
++        compatible = "allwinner,sun60i-a733-cpupll";
++        reg = <0x08870000 0x3034>;
++        clocks = <&osc24M>;
++        clock-names = "hosc";
++        #clock-cells = <1>;
++        #reset-cells = <1>;
++    };
++
++    clock-controller@7010000 {
++        compatible = "allwinner,sun60i-a733-r-ccu";
++        reg = <0x07010000 0x340>;
++        clocks = <&osc24M>, <&rtc CLK_OSC32K>, <&rtc CLK_IOSC>;
++        clock-names = "hosc", "losc", "iosc";
+         #clock-cells = <1>;
+         #reset-cells = <1>;
+     };
+diff --git a/Documentation/devicetree/bindings/pinctrl/allwinner,sun55i-a523-pinctrl.yaml b/Documentation/devicetree/bindings/pinctrl/allwinner,sun55i-a523-pinctrl.yaml
+index d7d0ba32c..b4a2b2d68 100644
+--- a/Documentation/devicetree/bindings/pinctrl/allwinner,sun55i-a523-pinctrl.yaml
++++ b/Documentation/devicetree/bindings/pinctrl/allwinner,sun55i-a523-pinctrl.yaml
+@@ -126,9 +126,7 @@ allOf:
+   - if:
+       properties:
+         compatible:
+-          enum:
+-            - allwinner,sun55i-a523-pinctrl
+-            - allwinner,sun60i-a733-pinctrl
++          const: allwinner,sun55i-a523-pinctrl
+ 
+     then:
+       properties:
+@@ -136,6 +134,17 @@ allOf:
+           minItems: 11
+           maxItems: 11
+ 
++  - if:
++      properties:
++        compatible:
++          const: allwinner,sun60i-a733-pinctrl
++
++    then:
++      properties:
++        interrupts:
++          minItems: 10
++          maxItems: 10
++
+   - if:
+       properties:
+         compatible:
+diff --git a/Documentation/devicetree/bindings/rtc/allwinner,sun6i-a31-rtc.yaml b/Documentation/devicetree/bindings/rtc/allwinner,sun6i-a31-rtc.yaml
+index ebe35f893..87e9d96b7 100644
+--- a/Documentation/devicetree/bindings/rtc/allwinner,sun6i-a31-rtc.yaml
++++ b/Documentation/devicetree/bindings/rtc/allwinner,sun6i-a31-rtc.yaml
+@@ -27,6 +27,7 @@ properties:
+           - allwinner,sun50i-h6-rtc
+           - allwinner,sun50i-h616-rtc
+           - allwinner,sun50i-r329-rtc
++          - allwinner,sun60i-a733-rtc
+       - items:
+           - const: allwinner,sun50i-a64-rtc
+           - const: allwinner,sun8i-h3-rtc
+@@ -168,6 +169,7 @@ allOf:
+               - allwinner,sun8i-r40-rtc
+               - allwinner,sun50i-h616-rtc
+               - allwinner,sun50i-r329-rtc
++              - allwinner,sun60i-a733-rtc
+ 
+     then:
+       properties:
+@@ -179,6 +181,33 @@ allOf:
+         interrupts:
+           minItems: 2
+ 
++  - if:
++      properties:
++        compatible:
++          contains:
++            const: allwinner,sun60i-a733-rtc
++
++    then:
++      properties:
++        clocks:
++          items:
++            - description: Bus clock for register access
++            - description: 24 MHz oscillator
++            - description: AHB parent for internal SPI clock
++
++        clock-names:
++          items:
++            - const: bus
++            - const: hosc
++            - const: ahb
++
++        interrupts:
++          maxItems: 1
++
++      required:
++        - clocks
++        - clock-names
++
+   - if:
+       properties:
+         compatible:
+@@ -186,6 +215,7 @@ allOf:
+             enum:
+               - allwinner,sun50i-h616-rtc
+               - allwinner,sun50i-r329-rtc
++              - allwinner,sun60i-a733-rtc
+ 
+     then:
+       properties:
+diff --git a/Documentation/devicetree/bindings/thermal/allwinner,sun8i-a83t-ths.yaml b/Documentation/devicetree/bindings/thermal/allwinner,sun8i-a83t-ths.yaml
+index 65171951e..f14d639bb 100644
+--- a/Documentation/devicetree/bindings/thermal/allwinner,sun8i-a83t-ths.yaml
++++ b/Documentation/devicetree/bindings/thermal/allwinner,sun8i-a83t-ths.yaml
+@@ -72,8 +72,6 @@ allOf:
+               - allwinner,sun20i-d1-ths
+               - allwinner,sun50i-a100-ths
+               - allwinner,sun50i-h6-ths
+-              - allwinner,sun50i-h616-ths
+-              - allwinner,sun60i-a733-ths
+ 
+     then:
+       properties:
+@@ -91,6 +89,26 @@ allOf:
+         clock-names:
+           minItems: 2
+ 
++  - if:
++      properties:
++        compatible:
++          contains:
++            enum:
++              - allwinner,sun50i-h616-ths
++              - allwinner,sun60i-a733-ths
++
++    then:
++      properties:
++        clocks:
++          items:
++            - description: Bus Clock
++            - description: Module Clock
++
++        clock-names:
++          items:
++            - const: bus
++            - const: mod
++
+   - if:
+       not:
+         properties:
+diff --git a/Documentation/devicetree/bindings/watchdog/allwinner,sun4i-a10-wdt.yaml b/Documentation/devicetree/bindings/watchdog/allwinner,sun4i-a10-wdt.yaml
+index 67c744fc3..3d2361335 100644
+--- a/Documentation/devicetree/bindings/watchdog/allwinner,sun4i-a10-wdt.yaml
++++ b/Documentation/devicetree/bindings/watchdog/allwinner,sun4i-a10-wdt.yaml
+@@ -10,9 +10,6 @@ maintainers:
+   - Chen-Yu Tsai <wens@csie.org>
+   - Maxime Ripard <mripard@kernel.org>
+ 
+-allOf:
+-  - $ref: watchdog.yaml#
+-
+ properties:
+   compatible:
+     oneOf:
+@@ -53,37 +50,51 @@ required:
+   - clocks
+   - interrupts
+ 
+-if:
+-  properties:
+-    compatible:
+-      contains:
+-        enum:
+-          - allwinner,sun20i-d1-wdt
+-          - allwinner,sun20i-d1-wdt-reset
+-          - allwinner,sun50i-r329-wdt
+-          - allwinner,sun50i-r329-wdt-reset
+-          - allwinner,sun55i-a523-wdt
+-          - allwinner,sun60i-a733-wdt
+-
+-then:
+-  properties:
+-    clocks:
+-      items:
+-        - description: High-frequency oscillator input, divided internally
+-        - description: Low-frequency oscillator input
+-
+-    clock-names:
+-      items:
+-        - const: hosc
+-        - const: losc
+-
+-  required:
+-    - clock-names
+-
+-else:
+-  properties:
+-    clocks:
+-      maxItems: 1
++allOf:
++  - $ref: watchdog.yaml#
++  - if:
++      properties:
++        compatible:
++          contains:
++            enum:
++              - allwinner,sun20i-d1-wdt
++              - allwinner,sun20i-d1-wdt-reset
++              - allwinner,sun50i-r329-wdt
++              - allwinner,sun50i-r329-wdt-reset
++              - allwinner,sun55i-a523-wdt
++
++    then:
++      properties:
++        clocks:
++          items:
++            - description: High-frequency oscillator input, divided internally
++            - description: Low-frequency oscillator input
++
++        clock-names:
++          items:
++            - const: hosc
++            - const: losc
++
++      required:
++        - clock-names
++
++  - if:
++      properties:
++        compatible:
++          contains:
++            const: allwinner,sun60i-a733-wdt
++
++    then:
++      properties:
++        clocks:
++          maxItems: 1
++
++        clock-names:
++          items:
++            - const: hosc
++
++      required:
++        - clock-names
+ 
+ unevaluatedProperties: false
+ 
+diff --git a/MAINTAINERS b/MAINTAINERS
+index d73899016..9814a5cf4 100644
+--- a/MAINTAINERS
++++ b/MAINTAINERS
+@@ -2606,7 +2606,7 @@ F:	drivers/pinctrl/sunxi/
+ F:	drivers/soc/sunxi/
+ N:	allwinner
+ N:	sun[x456789]i
+-N:	sun[25]0i
++N:	sun[2356]0i
+ 
+ ARM/ALPHASCALE ARCHITECTURE
+ M:	Krzysztof Kozlowski <krzk@kernel.org>
+diff --git a/arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi b/arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi
+index f09621b6c..24596f040 100644
+--- a/arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi
++++ b/arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi
+@@ -260,6 +260,7 @@ watchdog: watchdog@2050000 {
+ 			reg = <0x2050000 0x20>;
+ 			interrupts = <GIC_SPI 106 IRQ_TYPE_LEVEL_HIGH>;
+ 			clocks = <&osc24M>;
++			clock-names = "hosc";
+ 		};
+ 
+ 		r_pio: pinctrl@7025000 {

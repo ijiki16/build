@@ -1,0 +1,249 @@
+From 224bac41518b5449e061d50c8409566035a49f25 Mon Sep 17 00:00:00 2001
+From: Iuri Jikidze <37273763+ijiki16@users.noreply.github.com>
+Date: Tue, 17 Nov 2026 22:14:59 +0000
+Subject: [PATCH 27/28] arm64: dts: allwinner: add OrangePi 4 Pro SD-card
+ variant
+
+The OrangePi 4 Pro dts targets an NVMe rootfs and leaves the SD slot
+disabled. Add sun60i-a733-orangepi-4-pro-sd.dts, which boots Debian from
+the SD card and carries the board fixes found on the way:
+
+SD card (mmc0):
+- mux PF0..PF5 (the shared mmc0-pins group lacks PF0) and stop uart0
+  claiming PF2/PF4: the dtsi muxes uart0 there, which made mmc0 fail
+  with "pin PF2 already requested by 2500000.serial";
+- broken-cd: with cd-gpios on PF6 the board hit an RCU stall / soft
+  lockup right after mmc0 probed;
+- a fixed 3.3 V vmmc supply (dc1sw2, left on by boot0): without one the
+  MMC core rejects every card ("no support for card's volts").
+
+GPU: disabled. Debian's udev autoloads powervr.ko from the img,img-rogue
+alias and the board hard-hangs ~8 s into boot.
+
+Ethernet (GMAC0 + Motorcomm YT8531C, schematic OPi 4 Pro v1.3.2 p.19):
+- snps,clk-csr = <4>: the CSR clock is the 200 MHz AHB, not the 24 MHz
+  "stmmaceth" gate, so stmmac's auto choice gave a 12.5 MHz MDC; the
+  vendor driver hard-codes clk_csr = 4 (~2 MHz);
+- phy-handle, without which stmmac reports "no phy found" at open;
+- PHY reset on PH16 (RGMII1_PHYRSTB). The board dts uses PA14, but the
+  A733 has no port A, so the PHY probe deferred forever;
+- motorcomm,clk-out-frequency-hz = <125000000>: the PHY's CLK_OUT feeds
+  RGMII0-CLKIN (PH3), the GMAC's external TX clock; mainline disables
+  it by default and stmmac then fails with "Failed to reset the dma";
+- phy-mode = "rgmii-id" with rx-internal-delay-ps = <1900> and
+  tx-internal-delay-ps = <150>, reproducing the vendor kernel's PHY
+  state (ext 0xA001 = 0x8120, 0xA003 = 0x00f1). With plain "rgmii" the
+  RXC delay is cleared and almost no RX traffic arrives;
+- motorcomm,auto-sleep-disabled and keep-pll-enabled.
+
+PMIC: the PHY supply (VCC-3V3-PHY = dc1sw1, reg 0x11 bit 3 at 0x36) is
+off after boot0 and mainline has no driver for this PMIC. Describe its
+S-TWI0 bus (PL0/PL1) with no client so userspace can enable dc1sw1 via
+i2c-dev and re-probe the GMAC. A proper PMIC regulator driver would
+replace this.
+
+Tested on an OrangePi 4 Pro booting Debian 13 from SD: SD rootfs,
+serial console, NVMe, and Ethernet (100 Mb/s link, limited by the
+switch; DHCP, ping, SSH) with dc1sw1 enabled from userspace. Gigabit
+was not tested. The board dts itself is unchanged.
+
+This change was made with the help of an AI coding assistant (Claude);
+values were derived from the A733 manual, the board schematic and
+register dumps taken under the vendor kernel.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ arch/arm64/boot/dts/allwinner/Makefile        |   1 +
+ .../sun60i-a733-orangepi-4-pro-sd.dts         | 174 ++++++++++++++++++
+ 2 files changed, 175 insertions(+)
+ create mode 100644 arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-4-pro-sd.dts
+
+diff --git a/arch/arm64/boot/dts/allwinner/Makefile b/arch/arm64/boot/dts/allwinner/Makefile
+index d8e10033b..ba0832a70 100644
+--- a/arch/arm64/boot/dts/allwinner/Makefile
++++ b/arch/arm64/boot/dts/allwinner/Makefile
+@@ -69,3 +69,4 @@ dtb-$(CONFIG_ARCH_SUNXI) += sun55i-h728-x96qpro+.dtb
+ dtb-$(CONFIG_ARCH_SUNXI) += sun55i-t527-avaota-a1.dtb
+ dtb-$(CONFIG_ARCH_SUNXI) += sun55i-t527-orangepi-4a.dtb
+ dtb-$(CONFIG_ARCH_SUNXI) += sun60i-a733-orangepi-4-pro.dtb
++dtb-$(CONFIG_ARCH_SUNXI) += sun60i-a733-orangepi-4-pro-sd.dtb
+diff --git a/arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-4-pro-sd.dts b/arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-4-pro-sd.dts
+new file mode 100644
+index 000000000..1befd180f
+--- /dev/null
++++ b/arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-4-pro-sd.dts
+@@ -0,0 +1,174 @@
++// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
++/*
++ * Orange Pi 4 Pro, SD-card-rootfs variant.
++ *
++ * Same board as sun60i-a733-orangepi-4-pro.dts (rootfs on NVMe), plus:
++ *  - the SD slot (mmc0) re-enabled, muxed as PF0..PF5 like the vendor BSP;
++ *    uart0 no longer claims PF2/PF4 (they are SD lines; boot0 already muxed
++ *    the debug console);
++ *  - 3.3 V signalling only: no UHS (mainline has no driver for the board's
++ *    AXP PMIC to switch vqmmc to 1.8 V; vmmc dc1sw2 is left on by boot0);
++ *  - the GPU disabled (powervr.ko hangs the board on probe);
++ *  - working GMAC0 + YT8531C settings, and the PMIC's S-TWI0 bus exposed
++ *    through i2c-dev only, so userspace can switch on the PHY supply
++ *    (dc1sw1), which nothing else enables;
++ *  - root= pointing at the SD image's first partition.
++ *
++ * Tested on an OrangePi 4 Pro: boots Debian 13 from SD; Ethernet links at
++ * 100 Mb/s (switch limit), DHCP, ping and SSH work once dc1sw1 is on.
++ */
++
++#include "sun60i-a733-orangepi-4-pro.dts"
++
++/ {
++	chosen {
++		/*
++		 * vendor U-Boot drops the bootargs FDT fixup with booti + explicit
++		 * FDT, so the command line lives here (see board dts).
++		 */
++		bootargs = "root=PARTUUID=e86ba129-01 rootwait rootfstype=ext4 earlycon=uart8250,mmio32,0x02500000 console=ttyS0,115200n8 console=tty1 consoleblank=0 loglevel=7 printk.time=1 clk_ignore_unused swiotlb=65536 cma=512M panic=10";
++	};
++
++	/*
++	 * SD card power is AXP8191 dc1sw2, switched on by boot0. Mainline has
++	 * no AXP8191 driver, so describe it as a fixed always-on 3.3 V rail;
++	 * without a vmmc supply the MMC core has ocr_avail = 0 and rejects
++	 * every card ("no support for card's volts").
++	 */
++	reg_sd3v3: regulator-sd-3v3 {
++		compatible = "regulator-fixed";
++		regulator-name = "sd-3v3";
++		regulator-min-microvolt = <3300000>;
++		regulator-max-microvolt = <3300000>;
++		regulator-always-on;
++	};
++};
++
++/*
++ * PMIC bus (S-TWI0 on PL0/PL1, function 2; AXP318 at 0x36). No PMIC driver
++ * is bound: the bus is exposed through i2c-dev only, to inspect the rails
++ * (e.g. dc1sw1 = VCC-3V3-PHY) from userspace.
++ */
++&r_pio {
++	r_i2c0_pins: r-i2c0-pins {
++		pins = "PL0", "PL1";
++		function = "s_twi0";
++		allwinner,pinmux = <2>;
++		drive-strength = <10>;
++		bias-pull-up;
++	};
++};
++
++&{/soc} {
++	r_i2c0: i2c@7083000 {
++		compatible = "allwinner,sun8i-v536-i2c",
++			     "allwinner,sun6i-a31-i2c";
++		reg = <0x7083000 0x400>;
++		interrupts = <GIC_SPI 203 IRQ_TYPE_LEVEL_HIGH>;
++		clocks = <&r_ccu CLK_R_TWI0>;
++		resets = <&r_ccu RST_BUS_R_TWI0>;
++		pinctrl-names = "default";
++		pinctrl-0 = <&r_i2c0_pins>;
++		clock-frequency = <100000>;
++		#address-cells = <1>;
++		#size-cells = <0>;
++		status = "okay";
++	};
++};
++
++&pio {
++	mmc0_sd_pins: mmc0-sd-pins {
++		pins = "PF0", "PF1", "PF2", "PF3", "PF4", "PF5";
++		function = "mmc0";
++		allwinner,pinmux = <2>;
++		drive-strength = <30>;
++		bias-pull-up;
++	};
++};
++
++/*
++ * The dtsi muxes uart0 onto PF2/PF4 (the SD-slot debug pins), which steals
++ * SD data lines from mmc0 ("pin PF2 already requested by 2500000.serial").
++ * boot0 has already muxed the debug console, so leave the pins alone here.
++ */
++&uart0 {
++	/delete-property/ pinctrl-names;
++	/delete-property/ pinctrl-0;
++};
++
++/*
++ * powervr.ko freezes the board on probe (known issue of this port). On the
++ * NVMe Gentoo setup it is simply never loaded; Debian's udev autoloads it
++ * from the img,img-rogue alias, hard-hanging boot at ~7.7 s.
++ */
++&gpu {
++	status = "disabled";
++};
++
++/*
++ * MDC divider: the GMAC CSR clock is AHB (200 MHz), not the 24 MHz
++ * "stmmaceth" gate stmmac derives it from, so the auto-picked /16 gives
++ * a 12.5 MHz MDC (> 2.5 MHz MDIO limit) and the YT8531C never answers
++ * ("MDIO device at address 1 is missing"). The vendor driver hard-codes
++ * clk_csr = 4: 200 MHz / 102 = ~2 MHz.
++ */
++&gmac0 {
++	snps,clk-csr = <4>;
++	/* without it stmmac finds no PHY at open, though YT8531 binds */
++	phy-handle = <&gmac0_phy0>;
++	/*
++	 * Let the PHY driver program its RGMII delays (with plain "rgmii" the
++	 * motorcomm driver clears the strapped RXC delay and RX fails). The
++	 * MAC-side tx-delay/rx-delay (12/10) still apply, as on the vendor
++	 * kernel.
++	 */
++	phy-mode = "rgmii-id";
++};
++
++/*
++ * The board dts uses PA14, but the A733 has no port A (mainline's PA bank
++ * has 0 pins), so the PHY probe defers forever ("setup of GPIO reset
++ * failed: -517"). Schematic v1.3.2: RGMII1_PHYRSTB is PH16, through a
++ * 2SK3018 level shifter with a 10k pull-up to 3.3 V on the PHY side.
++ */
++&gmac0_phy0 {
++	reset-gpios = <&pio 7 16 GPIO_ACTIVE_LOW>; /* PH16 */
++	/*
++	 * stmmac's DMA soft reset needs the PHY's RGMII RX clock; keep the
++	 * YT8531C from sleeping / gating its PLL, else "Failed to reset the
++	 * dma" at open.
++	 */
++	motorcomm,auto-sleep-disabled;
++	motorcomm,keep-pll-enabled;
++	/*
++	 * The PHY's CLK_OUT feeds RGMII1-CLKIN-125M (PH3, RGMII0-CLKIN), the
++	 * GMAC's external TX clock (syscfg ETCS = ext GMII, as the vendor
++	 * sets). mainline motorcomm disables CLK_OUT unless this is given.
++	 */
++	motorcomm,clk-out-frequency-hz = <125000000>;
++	/*
++	 * Match the vendor kernel's working PHY state (ext 0xA001 = 0x8120,
++	 * RXC delay on; 0xA003 = 0x00f1, RX delay 0, GE TX delay 0.15 ns).
++	 */
++	rx-internal-delay-ps = <1900>;
++	tx-internal-delay-ps = <150>;
++};
++
++&mmc0 {
++	pinctrl-names = "default";
++	pinctrl-0 = <&mmc0_sd_pins>;
++	/*
++	 * Card detect is PF6 (vendor: GPIO_ACTIVE_LOW | GPIO_PULL_UP). With
++	 * cd-gpios the first boot hit an RCU stall / soft lockup on CPU0 in
++	 * softirq right after mmc0 probed (likely a GPIO IRQ storm), so poll
++	 * instead: the rootfs card never leaves the slot.
++	 */
++	broken-cd;
++	vmmc-supply = <&reg_sd3v3>;
++	bus-width = <4>;
++	max-frequency = <50000000>;
++	cap-sd-highspeed;
++	no-sdio;
++	no-mmc;
++	status = "okay";
++};

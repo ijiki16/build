@@ -1,0 +1,15 @@
+[Unit]
+Description=sun60iw2 mainline: power the Ethernet PHY (PMIC dc1sw1) and re-probe GMAC
+DefaultDependencies=no
+After=systemd-modules-load.service
+Before=network-pre.target
+Wants=network-pre.target
+ConditionPathExists=/sys/bus/platform/drivers/dwmac-sun60i
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/sun60iw2-eth-phy-power
+RemainAfterExit=yes
+
+[Install]
+WantedBy=sysinit.target

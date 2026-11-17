@@ -1,0 +1,61 @@
+From 484d4dcdb722cf8dcb5adabfa10af4ebc3708001 Mon Sep 17 00:00:00 2001
+From: Iuri Jikidze <37273763+ijiki16@users.noreply.github.com>
+Date: Tue, 17 Nov 2026 22:14:58 +0000
+Subject: [PATCH 25/28] pinctrl: sunxi: use 2-bit power mode fields on A733
+ (NCAT3)
+
+On the A733, GPIO_POW_MOD_SEL (PIO + 0x40) holds a 2-bit field per
+bank, bits [2n+1:2n] for bank n (A733 User Manual V0.92, 18.14):
+00/10 = 3.3 V withstand mode, 01 = auto, 11 = 1.8 V. The fields reset to
+10 (3.3 V); boot0 on the OrangePi 4 Pro sets most banks to 01 (auto).
+
+sunxi_pinctrl_set_io_bias_cfg() treats BIAS_VOLTAGE_PIO_POW_MODE_SEL as
+one bit per bank with 1 = 1.8 V. On the A733 that clobbers the wrong
+bits and selects 3.3 V mode for a 1.8 V bank. Write the 2-bit field
+for the NCAT3 register layout instead (11 for <= 1.8 V, 10 otherwise).
+
+This only matters once a vcc-pX-supply is described for a bank; no
+upstream A733 board does that today, so there is no runtime effect yet.
+Verified on an OrangePi 4 Pro by temporarily adding 1.8 V vcc-pc/vcc-ph
+supplies: POW_MOD_SEL read back 0x0115d570, i.e. PC and PH = 11 and the
+other banks left untouched. Not otherwise tested.
+
+No Fixes tag: the A733 pinctrl support this corrects comes from the
+mainline base of this series, whose history is not available in this
+(shallow) tree.
+
+This change was made with the help of an AI coding assistant (Claude).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/pinctrl/sunxi/pinctrl-sunxi.c | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
+
+diff --git a/drivers/pinctrl/sunxi/pinctrl-sunxi.c b/drivers/pinctrl/sunxi/pinctrl-sunxi.c
+index 181d02959..d76666b73 100644
+--- a/drivers/pinctrl/sunxi/pinctrl-sunxi.c
++++ b/drivers/pinctrl/sunxi/pinctrl-sunxi.c
+@@ -785,6 +785,23 @@ static int sunxi_pinctrl_set_io_bias_cfg(struct sunxi_pinctrl *pctl,
+ 
+ 		fallthrough;
+ 	case BIAS_VOLTAGE_PIO_POW_MODE_SEL:
++		/*
++		 * A733 (NCAT3): GPIO_POW_MOD_SEL holds a 2-bit field per bank
++		 * (00/10: 3.3V, 01: auto, 11: 1.8V), resetting to 10 (3.3V).
++		 * A bank powered at 1.8V left at 10 cannot reliably read inputs.
++		 */
++		if (pctl->flags & SUNXI_PINCTRL_NCAT3_REG_LAYOUT) {
++			val = uV <= 1800000 ? 0x3 : 0x2;
++
++			raw_spin_lock_irqsave(&pctl->lock, flags);
++			reg = readl(pctl->membase + pctl->pow_mod_sel_offset);
++			reg &= ~(0x3 << (bank * 2));
++			writel(reg | val << (bank * 2),
++			       pctl->membase + pctl->pow_mod_sel_offset);
++			raw_spin_unlock_irqrestore(&pctl->lock, flags);
++			return 0;
++		}
++
+ 		val = uV <= 1800000 ? 1 : 0;
+ 		if (inverted)
+ 			val = !val;

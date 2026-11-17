@@ -1,0 +1,353 @@
+From 4bf2d8dc8f819c1c876884a9abac88e2a214b22c Mon Sep 17 00:00:00 2001
+From: tumredsun <tumredsun@localhost>
+Date: Thu, 22 Oct 2026 13:12:58 +0000
+Subject: [PATCH 17/28] arm64/a733 bringup: UART trace markers across early
+ boot
+
+Add temporary debug tracing for the A733 bring-up:
+
+- head.S: tags for primary_switched, pre-/post-MMU and
+  return from __enable_mmu
+- pi/map_range.c: identity map UART0 (2 MiB device block) so
+  markers keep working with the MMU on
+- pi/map_kernel.c: markers across map_fdt/BSS/map_kernel/relocate
+- setup.c: dump the boot_command_line received from the
+  firmware and trace setup_arch past cpu_uninstall_idmap()
+  through a permanent fixmap mapping of UART0
+- init/main.c: markers around setup_arch() and parameter
+  parsing in start_kernel()
+---
+ arch/arm64/kernel/head.S          | 11 ++++++++++
+ arch/arm64/kernel/pi/map_kernel.c | 27 ++++++++++++++++++++++--
+ arch/arm64/kernel/pi/map_range.c  | 12 +++++++++++
+ arch/arm64/kernel/setup.c         | 34 +++++++++++++++++++++++++++++--
+ init/main.c                       | 19 ++++++++++++++++-
+ 5 files changed, 98 insertions(+), 5 deletions(-)
+
+diff --git a/arch/arm64/kernel/head.S b/arch/arm64/kernel/head.S
+index 88ab6ab7a..f531f383b 100644
+--- a/arch/arm64/kernel/head.S
++++ b/arch/arm64/kernel/head.S
+@@ -90,6 +90,8 @@
+ 
+ SYM_CODE_START(primary_entry)
+ 	uart_putc 'A'					// A733 debug: entered head.S
++	uart_putc 'F'
++	uart_putc '3'					// A733 debug: trace build tag
+ 	bl	record_mmu_state
+ 	bl	preserve_boot_args
+ 
+@@ -231,6 +233,8 @@ SYM_CODE_END(preserve_boot_args)
+  *   x0 = __pa(KERNEL_START)
+  */
+ SYM_FUNC_START_LOCAL(__primary_switched)
++	uart_putc 'P'
++	uart_putc '0'					// A733 debug: primary_switched
+ 	adr_l	x4, init_task
+ 	init_cpu_task x4, x5, x6
+ 
+@@ -256,6 +260,8 @@ SYM_FUNC_START_LOCAL(__primary_switched)
+ 	mov	x0, x20
+ 	bl	finalise_el2			// Prefer VHE if possible
+ 	ldp	x29, x30, [sp], #16
++	uart_putc 'P'
++	uart_putc '1'					// A733 debug: calling start_kernel
+ 	bl	start_kernel
+ 	ASM_BUG()
+ SYM_FUNC_END(__primary_switched)
+@@ -485,6 +491,8 @@ SYM_FUNC_START(__enable_mmu)
+ 	dsb	sy
+ 	isb
+ 	set_sctlr_el1	x0
++	uart_putc 'M'
++	uart_putc '2'					// A733 debug: mmu on
+ 
+ 	ret
+ SYM_FUNC_END(__enable_mmu)
+@@ -530,6 +538,9 @@ SYM_FUNC_START_LOCAL(__primary_switch)
+ 	adrp	x2, __pi_init_idmap_pg_dir
+ 	bl	__enable_mmu
+ 
++	uart_putc 'B'
++	uart_putc '5'					// A733 debug: returned, mmu on
++
+ 	adrp	x1, early_init_stack
+ 	mov	sp, x1
+ 	mov	x29, xzr
+diff --git a/arch/arm64/kernel/pi/map_kernel.c b/arch/arm64/kernel/pi/map_kernel.c
+index fb44cbdd2..ba539c110 100644
+--- a/arch/arm64/kernel/pi/map_kernel.c
++++ b/arch/arm64/kernel/pi/map_kernel.c
+@@ -20,6 +20,15 @@ extern const u8 __eh_frame_start[], __eh_frame_end[];
+ 
+ extern void idmap_cpu_replace_ttbr1(phys_addr_t pgdir);
+ 
++/*
++ * A733 debug: UART0 is identity mapped by create_init_idmap(), so these
++ * markers keep working with the MMU on.
++ */
++static noinline void __init pi_putc(char c)
++{
++	*(volatile u32 *)0x02500000 = (u32)c;
++}
++
+ static void __init map_segment(pgd_t *pg_dir, phys_addr_t *pgd, u64 va_offset,
+ 			       void *start, void *end, pgprot_t prot,
+ 			       bool may_use_cont, int root_level)
+@@ -40,6 +49,8 @@ static void __init map_kernel(u64 kaslr_offset, u64 va_offset, int root_level)
+ {
+ 	bool enable_scs = IS_ENABLED(CONFIG_UNWIND_PATCH_PAC_INTO_SCS);
+ 	bool twopass = IS_ENABLED(CONFIG_RELOCATABLE);
++
++	pi_putc('L'); pi_putc('0');
+ 	phys_addr_t pgdp = (phys_addr_t)init_pg_dir + PAGE_SIZE;
+ 	pgprot_t text_prot = PAGE_KERNEL_ROX;
+ 	pgprot_t data_prot = PAGE_KERNEL;
+@@ -95,12 +106,16 @@ static void __init map_kernel(u64 kaslr_offset, u64 va_offset, int root_level)
+ 	map_segment(init_pg_dir, &pgdp, va_offset, _data, _end, data_prot,
+ 		    true, root_level);
+ 	dsb(ishst);
++	pi_putc('L'); pi_putc('1');
+ 
+ 	idmap_cpu_replace_ttbr1((phys_addr_t)init_pg_dir);
++	pi_putc('L'); pi_putc('2');
+ 
+ 	if (twopass) {
+-		if (IS_ENABLED(CONFIG_RELOCATABLE))
++		if (IS_ENABLED(CONFIG_RELOCATABLE)) {
+ 			relocate_kernel(kaslr_offset);
++			pi_putc('L'); pi_putc('3');
++		}
+ 
+ 		if (enable_scs) {
+ 			scs_patch(__eh_frame_start + va_offset,
+@@ -136,6 +151,7 @@ static void __init map_kernel(u64 kaslr_offset, u64 va_offset, int root_level)
+ 	memcpy((void *)swapper_pg_dir + va_offset, init_pg_dir, PAGE_SIZE);
+ 	dsb(ishst);
+ 	idmap_cpu_replace_ttbr1((phys_addr_t)swapper_pg_dir);
++	pi_putc('L'); pi_putc('4');
+ }
+ 
+ static void noinline __section(".idmap.text") set_ttbr0_for_lpa2(phys_addr_t ttbr)
+@@ -246,14 +262,20 @@ asmlinkage void __init early_map_kernel(u64 boot_status, phys_addr_t fdt)
+ 	int root_level = 4 - CONFIG_PGTABLE_LEVELS;
+ 	int va_bits = VA_BITS;
+ 	int chosen;
+-	void *fdt_mapped = map_fdt(fdt);
++	void *fdt_mapped;
++
++	pi_putc('K'); pi_putc('0');
++	fdt_mapped = map_fdt(fdt);
++	pi_putc('K'); pi_putc('1');
+ 
+ 	/* Clear BSS and the initial page tables */
+ 	memset(__bss_start, 0, (char *)init_pg_end - (char *)__bss_start);
++	pi_putc('K'); pi_putc('2');
+ 
+ 	/* Parse the command line for CPU feature overrides */
+ 	chosen = fdt_path_offset(fdt_mapped, chosen_str);
+ 	init_feature_override(boot_status, fdt_mapped, chosen);
++	pi_putc('K'); pi_putc('3');
+ 
+ 	if (IS_ENABLED(CONFIG_ARM64_64K_PAGES) && !cpu_has_lva()) {
+ 		va_bits = VA_BITS_MIN;
+@@ -286,4 +308,5 @@ asmlinkage void __init early_map_kernel(u64 boot_status, phys_addr_t fdt)
+ 
+ 	va_base = KIMAGE_VADDR + kaslr_offset;
+ 	map_kernel(kaslr_offset, va_base - pa_base, root_level);
++	pi_putc('K'); pi_putc('5');
+ }
+diff --git a/arch/arm64/kernel/pi/map_range.c b/arch/arm64/kernel/pi/map_range.c
+index 761b14893..f682a9c5f 100644
+--- a/arch/arm64/kernel/pi/map_range.c
++++ b/arch/arm64/kernel/pi/map_range.c
+@@ -88,9 +88,13 @@ void __init map_range(phys_addr_t *pte, u64 start, u64 end, phys_addr_t pa,
+ 	}
+ }
+ 
++/* A733 debug: page tables for the UART0 identity mapping */
++static u8 uart_idmap_ptes[4 * PAGE_SIZE] __initdata __aligned(PAGE_SIZE);
++
+ asmlinkage phys_addr_t __init create_init_idmap(pgd_t *pg_dir, ptval_t clrmask)
+ {
+ 	phys_addr_t ptep = (phys_addr_t)pg_dir + PAGE_SIZE; /* MMU is off */
++	phys_addr_t uptep = (phys_addr_t)uart_idmap_ptes;
+ 	pgprot_t text_prot = PAGE_KERNEL_ROX;
+ 	pgprot_t data_prot = PAGE_KERNEL;
+ 
+@@ -105,5 +109,13 @@ asmlinkage phys_addr_t __init create_init_idmap(pgd_t *pg_dir, ptval_t clrmask)
+ 		  (phys_addr_t)__initdata_begin, data_prot, IDMAP_ROOT_LEVEL,
+ 		  (pte_t *)pg_dir, false, 0);
+ 
++	/*
++	 * A733 debug: keep UART0 (0x02500000) mapped as a 2 MiB device block
++	 * so early trace output keeps working after the MMU is enabled.
++	 */
++	map_range(&uptep, 0x02000000, 0x04000000, 0x02000000,
++		  __pgprot(PROT_DEVICE_nGnRnE), IDMAP_ROOT_LEVEL,
++		  (pte_t *)pg_dir, false, 0);
++
+ 	return ptep;
+ }
+diff --git a/arch/arm64/kernel/setup.c b/arch/arm64/kernel/setup.c
+index e8d3f8f67..1f9ae3d6c 100644
+--- a/arch/arm64/kernel/setup.c
++++ b/arch/arm64/kernel/setup.c
+@@ -279,8 +279,21 @@ u64 cpu_logical_map(unsigned int cpu)
+ 	return __cpu_logical_map[cpu];
+ }
+ 
++/* A733 debug: direct UART0 trace while the idmap is still installed */
++static noinline void __init a733_putc(char c)
++{
++	*(volatile u32 *)0x02500000 = (u32)c;
++}
++
++/* A733 debug: same UART through the permanent fixmap (survives idmap removal) */
++static noinline void __init a733_fix_putc(char c)
++{
++	*(volatile u32 *)__fix_to_virt(FIX_EARLYCON_MEM_BASE) = (u32)c;
++}
++
+ void __init __no_sanitize_address setup_arch(char **cmdline_p)
+ {
++	a733_putc('S'); a733_putc('2');
+ 		setup_initial_init_mm(_text, _etext, _edata, _end);
+ 
+ 	*cmdline_p = boot_command_line;
+@@ -288,16 +301,28 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
+ 	kaslr_init();
+ 
+ 	early_fixmap_init();
++	set_fixmap_io(FIX_EARLYCON_MEM_BASE, 0x02500000);
+ 	early_ioremap_init();
+ 
+ 	setup_machine_fdt(__fdt_pointer);
+-	
++	a733_fix_putc('S'); a733_fix_putc('3');
++	{
++		const char *p = boot_command_line;
++		int i;
++
++		a733_fix_putc('C'); a733_fix_putc(':');
++		for (i = 0; i < 100 && p[i]; i++)
++			a733_fix_putc(p[i]);
++		a733_fix_putc('|');
++	}
++
+ 	/*
+ 	 * Initialise the static keys early as they may be enabled by the
+ 	 * cpufeature code and early parameters.
+ 	 */
+ 	jump_label_init();
+ 	parse_early_param();
++	a733_fix_putc('S'); a733_fix_putc('4');
+ 	
+ 	dynamic_scs_init();
+ 
+@@ -313,12 +338,14 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
+ 	 * detected and initialized.
+ 	 */
+ 	local_daif_restore(DAIF_PROCCTX_NOIRQ);
++	a733_fix_putc('S'); a733_fix_putc('5');
+ 
+ 	/*
+ 	 * TTBR0 is only used for the identity mapping at this stage. Make it
+ 	 * point to zero page to avoid speculatively fetching new entries.
+ 	 */
+ 	cpu_uninstall_idmap();
++	a733_fix_putc('U'); a733_fix_putc('0');
+ 
+ 	xen_early_init();
+ 	efi_init();
+@@ -333,6 +360,7 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
+ 	arm64_memblock_init();
+ 
+ 	paging_init();
++	a733_fix_putc('P'); a733_fix_putc('2');
+ 
+ 	acpi_table_upgrade();
+ 
+@@ -341,6 +369,7 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
+ 
+ 	if (acpi_disabled)
+ 		unflatten_device_tree();
++	a733_fix_putc('P'); a733_fix_putc('3');
+ 
+ 	bootmem_init();
+ 
+@@ -374,7 +403,8 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
+ 			"This indicates a broken bootloader or old kernel\n",
+ 			boot_args[1], boot_args[2], boot_args[3]);
+ 	}
+-	}
++	a733_fix_putc('P'); a733_fix_putc('4');
++}
+ 
+ static inline bool cpu_can_disable(unsigned int cpu)
+ {
+diff --git a/init/main.c b/init/main.c
+index 8a5c818a6..27ce0db7f 100644
+--- a/init/main.c
++++ b/init/main.c
+@@ -115,6 +115,7 @@
+ #include <asm/setup.h>
+ #include <asm/sections.h>
+ #include <asm/cacheflush.h>
++#include <asm/fixmap.h>
+ 
+ #define CREATE_TRACE_POINTS
+ #include <trace/events/initcall.h>
+@@ -1041,13 +1042,25 @@ static void __init print_kernel_cmdline(const char *cmdline)
+ 		pr_notice("%s%s\n", KERNEL_CMDLINE_PREFIX, cmdline);
+ }
+ 
++/* A733 debug: direct UART0 trace while the idmap is still installed */
++static noinline void __init a733_putc(char c)
++{
++	*(volatile u32 *)0x02500000 = (u32)c;
++}
++
++/* A733 debug: same UART through the permanent fixmap (survives idmap removal) */
++static noinline void __init a733_fix_putc(char c)
++{
++	*(volatile u32 *)__fix_to_virt(FIX_EARLYCON_MEM_BASE) = (u32)c;
++}
++
+ asmlinkage __visible __init __no_sanitize_address __noreturn __no_stack_protector
+ void start_kernel(void)
+ {
+ 	char *command_line;
+ 	char *after_dashes;
+ 
+-	
++	a733_putc('S'); a733_putc('0');
+ 	set_task_stack_end_magic(&init_task);
+ 	smp_setup_processor_id();
+ 	debug_objects_early_init();
+@@ -1065,7 +1078,9 @@ void start_kernel(void)
+ 	boot_cpu_init();
+ 	page_address_init();
+ 	pr_notice("%s", linux_banner);
++	a733_putc('S'); a733_putc('1');
+ 	setup_arch(&command_line);
++	a733_fix_putc('S'); a733_fix_putc('6');
+ 	mm_core_init_early();
+ 	/* Static keys and static calls are needed by LSMs */
+ 	jump_label_init();
+@@ -1082,6 +1097,7 @@ void start_kernel(void)
+ 	print_kernel_cmdline(saved_command_line);
+ 	/* parameters may set static keys */
+ 	parse_early_param();
++	a733_fix_putc('S'); a733_fix_putc('7');
+ 	after_dashes = parse_args("Booting kernel",
+ 				  static_command_line, __start___param,
+ 				  __stop___param - __start___param,
+@@ -1093,6 +1109,7 @@ void start_kernel(void)
+ 	if (!IS_ERR_OR_NULL(after_dashes))
+ 		parse_args("Setting init args", after_dashes, NULL, 0, -1, -1,
+ 			   NULL, set_init_arg);
++	a733_fix_putc('S'); a733_fix_putc('8');
+ 
+ 	/* Architectural and non-timekeeping rng init, before allocator init */
+ 	random_init_early(command_line);

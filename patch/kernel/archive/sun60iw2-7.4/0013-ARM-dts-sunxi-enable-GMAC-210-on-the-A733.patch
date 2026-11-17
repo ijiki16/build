@@ -1,0 +1,113 @@
+From 2d7dfa2f24a6af35dc1f165d734a49565a84664f Mon Sep 17 00:00:00 2001
+From: tumredsun <tumredsun@localhost>
+Date: Wed, 21 Oct 2026 06:02:03 +0000
+Subject: [PATCH 13/28] ARM: dts: sunxi: enable GMAC-210 on the A733
+
+---
+ .../allwinner/sun60i-a733-orangepi-4-pro.dts  | 29 +++++++++++++
+ .../arm64/boot/dts/allwinner/sun60i-a733.dtsi | 41 +++++++++++++++++++
+ 2 files changed, 70 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-4-pro.dts b/arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-4-pro.dts
+index 91e32ad1a..26d24d939 100644
+--- a/arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-4-pro.dts
++++ b/arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-4-pro.dts
+@@ -19,6 +19,14 @@ aliases {
+ 	chosen {
+ 		stdout-path = "serial0:115200n8";
+ 	};
++
++	reg_gmac3v3: regulator-gmac-3v3 {
++		compatible = "regulator-fixed";
++		regulator-name = "gmac-3v3";
++		regulator-min-microvolt = <3300000>;
++		regulator-max-microvolt = <3300000>;
++		regulator-always-on;
++	};
+ };
+ 
+ &uart0 {
+@@ -36,3 +44,24 @@ &mmc2 {
+ 	non-removable;
+ 	status = "okay";
+ };
++
++&gmac0 {
++	status = "okay";
++
++	assigned-clocks = <&ccu CLK_GMAC0_PHY>;
++	assigned-clock-rates = <25000000>;
++
++	tx-delay = <12>;
++	rx-delay = <10>;
++	phy-supply = <&reg_gmac3v3>;
++
++	mdio {
++		#address-cells = <1>;
++		#size-cells = <0>;
++
++		gmac0_phy0: ethernet-phy@1 {
++			compatible = "ethernet-phy-ieee802.3-c22";
++			reg = <1>;
++		};
++	};
++};
+diff --git a/arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi b/arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi
+index 6fcb602c3..e28325e3c 100644
+--- a/arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi
++++ b/arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi
+@@ -191,6 +191,17 @@ mmc2_pins: mmc2-pins {
+ 				drive-strength = <30>;
+ 				bias-pull-up;
+ 			};
++
++			rgmii0_pins: rgmii0-pins {
++				pins = "PH0", "PH1", "PH2", "PH3", "PH4",
++				       "PH5", "PH6", "PH7", "PH8", "PH9",
++				       "PH10", "PH11", "PH12", "PH13",
++				       "PH14", "PH15";
++				function = "gmac0";
++				allwinner,pinmux = <5>;
++				drive-strength = <40>;
++				bias-disable;
++			};
+ 		};
+ 
+ 		gic: interrupt-controller@3400000 {
+@@ -333,6 +344,36 @@ mmc2: mmc@4022000 {
+ 			#size-cells = <0>;
+ 		};
+ 
++		gmac0: ethernet@4500000 {
++			compatible = "allwinner,sun60i-a733-gmac0";
++			reg = <0x4500000 0x8000>,
++			      <0x4508000 0x1000>;
++			interrupts = <GIC_SPI 172 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 178 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 173 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 174 IRQ_TYPE_LEVEL_HIGH>;
++			interrupt-names = "macirq", "eth_lpi",
++					  "tx-queue-0", "rx-queue-0";
++			clocks = <&ccu CLK_GMAC0>,
++				 <&ccu CLK_GMAC0_MBUS>,
++				 <&ccu CLK_GMAC0_PHY>,
++				 <&ccu CLK_GMAC_PTP>;
++			clock-names = "stmmaceth", "mbus", "phy", "ptp_ref";
++			resets = <&ccu RST_BUS_GMAC0>,
++				 <&ccu RST_BUS_GMAC0_AXI>;
++			reset-names = "stmmaceth", "ahb";
++			phy-mode = "rgmii";
++			pinctrl-names = "default";
++			pinctrl-0 = <&rgmii0_pins>;
++			status = "disabled";
++
++			mdio0: mdio {
++				compatible = "snps,dwmac-mdio";
++				#address-cells = <1>;
++				#size-cells = <0>;
++			};
++		};
++
+ 		serdes: phy@6c00000 {
+ 			compatible = "allwinner,sun60i-a733-serdes";
+ 			reg = <0x6c00000 0x400>,

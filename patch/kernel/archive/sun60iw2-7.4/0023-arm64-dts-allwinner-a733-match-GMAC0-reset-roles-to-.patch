@@ -1,0 +1,45 @@
+From 9f80b4db79677cb97c288b96349768ad1d5f95bb Mon Sep 17 00:00:00 2001
+From: Iuri Jikidze <37273763+ijiki16@users.noreply.github.com>
+Date: Tue, 17 Nov 2026 22:14:58 +0000
+Subject: [PATCH 23/28] arm64: dts: allwinner: a733: match GMAC0 reset roles to
+ the vendor BSP
+
+stmmac pulses its "stmmaceth" reset (assert + deassert) during probe and
+only deasserts the shared "ahb" one. With "stmmaceth" bound to
+RST_BUS_GMAC0 the GMAC bus reset is pulsed after the glue has programmed
+its syscfg register, wiping the RGMII/delay setup back to its reset
+value 0x8000 (PHY_SEL = internal EPHY).
+
+Bind "stmmaceth" to RST_BUS_GMAC0_AXI and "ahb" to RST_BUS_GMAC0, the
+roles the vendor BSP (sun60iw2p1.dtsi, dwmac-sunxi) uses, so the glue can
+release the bus reset itself (as a shared consumer) before programming
+syscfg, and stmmac only pulses the AXI reset.
+
+Verified on an OrangePi 4 Pro together with the following dwmac-sun60i
+change: syscfg reads back 0x00011145, the same as under the vendor 6.6
+kernel.
+
+This change was made with the help of an AI coding assistant (Claude);
+the analysis compared register dumps between the vendor and mainline
+kernels on the board.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi b/arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi
+index f24d81d50..6c7c3fe78 100644
+--- a/arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi
++++ b/arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi
+@@ -437,8 +437,8 @@ gmac0: ethernet@4500000 {
+ 				 <&ccu CLK_GMAC0_PHY>,
+ 				 <&ccu CLK_GMAC_PTP>;
+ 			clock-names = "stmmaceth", "mbus", "phy", "ptp_ref";
+-			resets = <&ccu RST_BUS_GMAC0>,
+-				 <&ccu RST_BUS_GMAC0_AXI>;
++			resets = <&ccu RST_BUS_GMAC0_AXI>,
++				 <&ccu RST_BUS_GMAC0>;
+ 			reset-names = "stmmaceth", "ahb";
+ 			phy-mode = "rgmii";
+ 			pinctrl-names = "default";

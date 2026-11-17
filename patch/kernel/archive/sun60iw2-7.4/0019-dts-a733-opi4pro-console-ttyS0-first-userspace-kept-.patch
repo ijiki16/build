@@ -1,0 +1,47 @@
+From 288e44cfd2bcef6933c690435c61f8cd5e4b2b4d Mon Sep 17 00:00:00 2001
+From: tumredsun <tumredsun@localhost>
+Date: Fri, 6 Nov 2026 16:43:03 +0000
+Subject: [PATCH 19/28] dts/a733-opi4pro: console=ttyS0 first - userspace kept
+ the UART dark with tty1-only
+
+---
+ .../dts/allwinner/sun60i-a733-orangepi-4-pro.dts   | 14 ++++++++++++--
+ 1 file changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-4-pro.dts b/arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-4-pro.dts
+index 1a0371d58..f13f2d4a2 100644
+--- a/arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-4-pro.dts
++++ b/arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-4-pro.dts
+@@ -21,12 +21,19 @@ memory@40000000 {
+ 
+ 	aliases {
+ 		serial0 = &uart0;
+-		mmc0 = &mmc0;
++		mmc0 = &mmc1;
+ 		mmc1 = &mmc2;
+ 	};
+ 
+ 	chosen {
+ 		stdout-path = "serial0:115200n8";
++		/* This vendor U-Boot drops the bootargs FDT fixup when booti is
++		 * given an explicit FDT address, so carry the command line in
++		 * the DTB itself. */
++		/* ttyS0 listed BEFORE tty1: userspace (systemd/getty) must keep
++		 * the UART console alive - #82/power-blank after init proved
++		 * console=tty1-only leaves the board blind. */
++		bootargs = "root=PARTUUID=527e29fa-1a14-4ec4-a4de-df61c015c083 rootwait rootfstype=ext4 earlycon=uart8250,mmio32,0x02500000 keep_bootcon console=ttyS0,115200n8 console=tty1 nokaslr consoleblank=0 loglevel=8 printk.time=1 logo.nologo clk_ignore_unused swiotlb=65536 cma=512M panic=5";
+ 	};
+ 
+ 	reg_gmac3v3: regulator-gmac-3v3 {
+@@ -80,7 +87,10 @@ &pcie {
+ };
+ 
+ &mmc0 {
+-	cd-gpios = <&pio 5 6 GPIO_ACTIVE_LOW>; /* PF6 */
++	status = "disabled";
++};
++
++&mmc1 {
+ 	bus-width = <4>;
+ 	status = "okay";
+ };

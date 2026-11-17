@@ -1,0 +1,208 @@
+From b14cbb33a230aab3c1de32812e6db28dc2fd88fe Mon Sep 17 00:00:00 2001
+From: tumredsun <tumredsun@localhost>
+Date: Wed, 21 Oct 2026 06:02:02 +0000
+Subject: [PATCH 12/28] net: stmmac: add Allwinner A733 GMAC-210 glue
+
+---
+ drivers/net/ethernet/stmicro/stmmac/Kconfig   |  11 ++
+ drivers/net/ethernet/stmicro/stmmac/Makefile  |   1 +
+ .../ethernet/stmicro/stmmac/dwmac-sun60i.c    | 156 ++++++++++++++++++
+ 3 files changed, 168 insertions(+)
+ create mode 100644 drivers/net/ethernet/stmicro/stmmac/dwmac-sun60i.c
+
+diff --git a/drivers/net/ethernet/stmicro/stmmac/Kconfig b/drivers/net/ethernet/stmicro/stmmac/Kconfig
+index c6559e749..974873794 100644
+--- a/drivers/net/ethernet/stmicro/stmmac/Kconfig
++++ b/drivers/net/ethernet/stmicro/stmmac/Kconfig
+@@ -310,6 +310,17 @@ config DWMAC_SUN55I
+ 	  stmmac device driver. This driver is used for A523/T527
+ 	  GMAC200 ethernet controller.
+ 
++config DWMAC_SUN60I
++	tristate "Allwinner sun60i GMAC-210 support"
++	default ARCH_SUNXI
++	depends on OF && (ARCH_SUNXI || COMPILE_TEST)
++	help
++	  Support for Allwinner A733 GMAC-210 ethernet controllers.
++
++	  This selects Allwinner SoC glue layer support for the
++	  stmmac device driver. This driver is used for the A733
++	  GMAC-210 ethernet controller.
++
+ config DWMAC_THEAD
+ 	tristate "T-HEAD dwmac support"
+ 	depends on OF && (ARCH_THEAD || COMPILE_TEST)
+diff --git a/drivers/net/ethernet/stmicro/stmmac/Makefile b/drivers/net/ethernet/stmicro/stmmac/Makefile
+index b16a456b7..a106d6d1d 100644
+--- a/drivers/net/ethernet/stmicro/stmmac/Makefile
++++ b/drivers/net/ethernet/stmicro/stmmac/Makefile
+@@ -35,6 +35,7 @@ obj-$(CONFIG_DWMAC_STM32)	+= dwmac-stm32.o
+ obj-$(CONFIG_DWMAC_SUNXI)	+= dwmac-sunxi.o
+ obj-$(CONFIG_DWMAC_SUN8I)	+= dwmac-sun8i.o
+ obj-$(CONFIG_DWMAC_SUN55I)	+= dwmac-sun55i.o
++obj-$(CONFIG_DWMAC_SUN60I)	+= dwmac-sun60i.o
+ obj-$(CONFIG_DWMAC_THEAD)	+= dwmac-thead.o
+ obj-$(CONFIG_DWMAC_ULTRARISC)	+= dwmac-ultrarisc.o
+ obj-$(CONFIG_DWMAC_DWC_QOS_ETH)	+= dwmac-dwc-qos-eth.o
+diff --git a/drivers/net/ethernet/stmicro/stmmac/dwmac-sun60i.c b/drivers/net/ethernet/stmicro/stmmac/dwmac-sun60i.c
+new file mode 100644
+index 000000000..26c0b783f
+--- /dev/null
++++ b/drivers/net/ethernet/stmicro/stmmac/dwmac-sun60i.c
+@@ -0,0 +1,156 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * dwmac-sun60i.c - Allwinner sun60i GMAC-210 glue layer
++ *
++ * Copyright (C) 2026 tumredsun <tumredsun@localhost>
++ *
++ * The Allwinner A733 carries two GMAC-210 (DesignWare 5.20) ethernet
++ * controllers.  All the glue registers, including the RGMII PHY clock
++ * bits and the RGMII TX/RX delay chains, live in a dedicated block
++ * mapped right behind each controller.
++ */
++
++#include <linux/bits.h>
++#include <linux/bitfield.h>
++#include <linux/clk.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/phy.h>
++#include <linux/platform_device.h>
++#include <linux/regulator/consumer.h>
++#include <linux/stmmac.h>
++
++#include "stmmac.h"
++#include "stmmac_platform.h"
++
++/* GMAC-210 glue registers, offsets within the second memory region. */
++#define GMAC210_SYS_CFG			0x00
++#define   GMAC210_ETXDC_H		GENMASK(17, 16)
++#define   GMAC210_PHY_SEL		BIT(15)
++#define   GMAC210_ENDIAN_MODE		BIT(14)
++#define   GMAC210_RMII_EN		BIT(13)
++#define   GMAC210_ETXDC_L		GENMASK(12, 10)
++#define   GMAC210_ERXDC			GENMASK(9, 5)
++#define   GMAC210_EPIT			BIT(2) /* 1: RGMII, 0: MII */
++#define   GMAC210_ETCS			GENMASK(1, 0)
++#define     GMAC210_ETCS_MII		0x0
++#define     GMAC210_ETCS_EXT_GMII	0x1
++#define     GMAC210_ETCS_INT_GMII	0x2
++
++#define GMAC210_MAX_TX_DELAY		0x3f
++#define GMAC210_MAX_RX_DELAY		0x3f
++
++static int sun60i_gmac_syscfg(struct device *dev, void __iomem *syscfg_base,
++			      struct plat_stmmacenet_data *plat)
++{
++	struct device_node *node = dev->of_node;
++	u32 val;
++	u32 reg = 0;
++
++	switch (plat->phy_interface) {
++	case PHY_INTERFACE_MODE_MII:
++		/* default */
++		break;
++	case PHY_INTERFACE_MODE_RGMII:
++	case PHY_INTERFACE_MODE_RGMII_ID:
++	case PHY_INTERFACE_MODE_RGMII_RXID:
++	case PHY_INTERFACE_MODE_RGMII_TXID:
++		reg |= FIELD_PREP(GMAC210_ETCS, GMAC210_ETCS_INT_GMII) |
++		       GMAC210_EPIT;
++		break;
++	case PHY_INTERFACE_MODE_RMII:
++		reg |= GMAC210_RMII_EN;
++		break;
++	default:
++		return dev_err_probe(dev, -EINVAL, "Unsupported interface mode: %s",
++				     phy_modes(plat->phy_interface));
++	}
++
++	if (!of_property_read_u32(node, "tx-delay", &val)) {
++		if (val > GMAC210_MAX_TX_DELAY) {
++			dev_err_probe(dev, -EINVAL,
++				      "Invalid TX clock delay: %u\n", val);
++			return -EINVAL;
++		}
++		dev_dbg(dev, "set tx-delay to %x\n", val);
++		reg |= FIELD_PREP(GMAC210_ETXDC_H, val >> 3) |
++		       FIELD_PREP(GMAC210_ETXDC_L, val);
++	}
++
++	if (!of_property_read_u32(node, "rx-delay", &val)) {
++		if (val > GMAC210_MAX_RX_DELAY) {
++			dev_err_probe(dev, -EINVAL,
++				      "Invalid RX clock delay: %u\n", val);
++			return -EINVAL;
++		}
++		dev_dbg(dev, "set rx-delay to %x\n", val);
++		reg |= FIELD_PREP(GMAC210_ERXDC, val);
++	}
++
++	writel(reg, syscfg_base + GMAC210_SYS_CFG);
++
++	return 0;
++}
++
++static int sun60i_gmac_probe(struct platform_device *pdev)
++{
++	struct plat_stmmacenet_data *plat_dat;
++	struct stmmac_resources stmmac_res;
++	struct device *dev = &pdev->dev;
++	struct clk *clk;
++	void __iomem *syscfg_base;
++	int ret;
++
++	ret = stmmac_get_platform_resources(pdev, &stmmac_res);
++	if (ret)
++		return ret;
++
++	syscfg_base = devm_platform_ioremap_resource(pdev, 1);
++	if (IS_ERR(syscfg_base))
++		return dev_err_probe(dev, PTR_ERR(syscfg_base),
++				     "Failed to map the glue registers\n");
++
++	plat_dat = devm_stmmac_probe_config_dt(pdev, stmmac_res.mac);
++	if (IS_ERR(plat_dat))
++		return PTR_ERR(plat_dat);
++
++	/* Unsupported on this generation of the IP. */
++	plat_dat->flags |= STMMAC_FLAG_SPH_DISABLE;
++	plat_dat->host_dma_width = 32;
++
++	ret = sun60i_gmac_syscfg(dev, syscfg_base, plat_dat);
++	if (ret)
++		return ret;
++
++	clk = devm_clk_get_enabled(dev, "mbus");
++	if (IS_ERR(clk))
++		return dev_err_probe(dev, PTR_ERR(clk),
++				     "Failed to get or enable MBUS clock\n");
++
++	ret = devm_regulator_get_enable_optional(dev, "phy");
++	if (ret)
++		return dev_err_probe(dev, ret, "Failed to get or enable PHY supply\n");
++
++	return devm_stmmac_pltfr_probe(pdev, plat_dat, &stmmac_res);
++}
++
++static const struct of_device_id sun60i_gmac_match[] = {
++	{ .compatible = "allwinner,sun60i-a733-gmac0" },
++	{ .compatible = "allwinner,sun60i-a733-gmac1" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, sun60i_gmac_match);
++
++static struct platform_driver sun60i_gmac_driver = {
++	.probe  = sun60i_gmac_probe,
++	.driver = {
++		.name           = "dwmac-sun60i",
++		.pm		= &stmmac_pltfr_pm_ops,
++		.of_match_table = sun60i_gmac_match,
++	},
++};
++module_platform_driver(sun60i_gmac_driver);
++
++MODULE_AUTHOR("tumredsun <tumredsun@localhost>");
++MODULE_DESCRIPTION("Allwinner sun60i GMAC-210 specific glue layer");
++MODULE_LICENSE("GPL");

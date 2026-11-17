@@ -1,0 +1,167 @@
+From 9a798e5fa4c2db9a594ca619000b8a84f99d9cc3 Mon Sep 17 00:00:00 2001
+From: tumredsun <tumredsun@localhost>
+Date: Fri, 6 Nov 2026 16:24:01 +0000
+Subject: [PATCH 18/28] dts/a733: enable pck600, add BXM-4-64 gpu node and OPP
+ table
+
+---
+ .../arm64/boot/dts/allwinner/sun60i-a733.dtsi | 90 +++++++++++++++++--
+ 1 file changed, 83 insertions(+), 7 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi b/arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi
+index e28325e3c..1cce17c13 100644
+--- a/arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi
++++ b/arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi
+@@ -162,10 +162,11 @@ pio: pinctrl@2000000 {
+ 			interrupt-controller;
+ 			#interrupt-cells = <3>;
+ 
+-			uart0_pb_pins: uart0-pb-pins {
+-				pins = "PB8", "PB9";
++			uart0_pf_pins: uart0-pf-pins {
++				pins = "PF2", "PF4";
+ 				function = "uart0";
+-				allwinner,pinmux = <2>;
++				allwinner,pinmux = <3>;
++				drive-strength = <10>;
+ 			};
+ 
+ 			mmc0_pins: mmc0-pins {
+@@ -183,6 +184,22 @@ mmc0_cd_pin: mmc0-cd-pin {
+ 				bias-pull-up;
+ 			};
+ 
++			mmc1_pins: mmc1-pins {
++				pins = "PG1", "PG2", "PG3", "PG4", "PG5";
++				function = "mmc1";
++				allwinner,pinmux = <2>;
++				drive-strength = <10>;
++				bias-pull-up;
++			};
++
++			mmc1_clk_pin: mmc1-clk-pin {
++				pins = "PG0";
++				function = "mmc1";
++				allwinner,pinmux = <2>;
++				drive-strength = <20>;
++				bias-pull-up;
++			};
++
+ 			mmc2_pins: mmc2-pins {
+ 				pins = "PC0", "PC6", "PC8", "PC9", "PC10",
+ 				       "PC11", "PC13", "PC14", "PC15", "PC16";
+@@ -214,12 +231,14 @@ gic: interrupt-controller@3400000 {
+ 			reg = <0x3400000 0x10000>,
+ 			      <0x3460000 0x100000>;
+ 			interrupts = <GIC_PPI 9 IRQ_TYPE_LEVEL_HIGH>;
++			dma-noncoherent;
+ 
+ 			its: msi-controller@3440000 {
+ 				compatible = "arm,gic-v3-its";
+ 				reg = <0x3440000 0x20000>;
+ 				msi-controller;
+ 				#msi-cells = <1>;
++				dma-noncoherent;
+ 			};
+ 		};
+ 
+@@ -264,6 +283,42 @@ pck600: power-controller@7060000 {
+ 			reg = <0x7060000 0xb000>;
+ 			clocks = <&r_ccu CLK_R_PPU>;
+ 			#power-domain-cells = <1>;
++			status = "okay";
++		};
++
++		gpu: gpu@1800000 {
++			compatible = "allwinner,sun60i-a733-gpu", "img,img-bxm-4-64",
++				     "img,img-rogue";
++			reg = <0x1800000 0x90000>;
++			interrupts = <GIC_SPI 63 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 64 IRQ_TYPE_LEVEL_HIGH>;
++			interrupt-names = "IRQGPU", "IRQGPUDVFS";
++			clocks = <&ccu CLK_GPU0>, <&ccu CLK_BUS_GPU0>;
++			clock-names = "core", "sys";
++			resets = <&ccu RST_BUS_GPU0>;
++			power-domains = <&pck600 PD_GPU_TOP>;
++			operating-points-v2 = <&gpu_opp_table>;
++			#cooling-cells = <2>;
++		};
++
++		gpu_opp_table: opp-table-gpu {
++			compatible = "operating-points-v2";
++
++			opp@300000000 {
++				opp-hz = /bits/ 64 <300000000>;
++			};
++			opp@500000000 {
++				opp-hz = /bits/ 64 <500000000>;
++			};
++			opp@600000000 {
++				opp-hz = /bits/ 64 <600000000>;
++			};
++			opp@806000000 {
++				opp-hz = /bits/ 64 <806000000>;
++			};
++			opp@1008000000 {
++				opp-hz = /bits/ 64 <1008000000>;
++			};
+ 		};
+ 
+ 		watchdog: watchdog@2050000 {
+@@ -297,6 +352,8 @@ uart0: serial@2500000 {
+ 			reg-io-width = <4>;
+ 			clocks = <&ccu CLK_UART0>;
+ 			resets = <&ccu RST_BUS_UART0>;
++			pinctrl-names = "default";
++			pinctrl-0 = <&uart0_pf_pins>;
+ 			status = "disabled";
+ 		};
+ 
+@@ -322,6 +379,27 @@ mmc0: mmc@4020000 {
+ 			#size-cells = <0>;
+ 		};
+ 
++		mmc1: mmc@4021000 {
++			compatible = "allwinner,sun60i-a733-mmc",
++				     "allwinner,sun20i-d1-mmc";
++			reg = <0x4021000 0x1000>;
++			clocks = <&ccu CLK_BUS_SMHC1>,
++				 <&ccu CLK_SMHC1>;
++			clock-names = "ahb", "mmc";
++			resets = <&ccu RST_BUS_SMHC1>;
++			reset-names = "ahb";
++			interrupts = <GIC_SPI 162 IRQ_TYPE_LEVEL_HIGH>;
++			pinctrl-names = "default";
++			pinctrl-0 = <&mmc1_pins>, <&mmc1_clk_pin>;
++			status = "disabled";
++
++			max-frequency = <150000000>;
++			cap-sd-highspeed;
++			cap-sdio-irq;
++			#address-cells = <1>;
++			#size-cells = <0>;
++		};
++
+ 		mmc2: mmc@4022000 {
+ 			compatible = "allwinner,sun60i-a733-mmc",
+ 				     "allwinner,sun20i-d1-mmc";
+@@ -380,9 +458,8 @@ serdes: phy@6c00000 {
+ 			      <0x6c06000 0x2000>,
+ 			      <0x6c02000 0xa00>,
+ 			      <0x6ca0000 0x20000>;
+-			clocks = <&ccu CLK_SERDES_PHY_CFG>,
+-				 <&rtc CLK_HOSC_SERDES1>;
+-			clock-names = "serdes-clk", "dcxo-serdes1-clk";
++			clocks = <&ccu CLK_SERDES_PHY_CFG>;
++			clock-names = "serdes-clk";
+ 			resets = <&ccu RST_BUS_SERDES>;
+ 			reset-names = "serdes-reset";
+ 			#phy-cells = <0>;
+@@ -420,7 +497,6 @@ pcie: pcie@6000000 {
+ 
+ 			phys = <&serdes>;
+ 			phy-names = "pcie";
+-			power-domains = <&pck600 PD_PCIE>;
+ 
+ 			interrupt-map-mask = <0 0 0 7>;
+ 			interrupt-map = <0 0 0 1 &pcie_intc 0>,

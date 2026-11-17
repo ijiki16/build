@@ -1,0 +1,55 @@
+From 568532f0b5fa862b82176cf0568982c817d849da Mon Sep 17 00:00:00 2001
+From: Iuri Jikidze <37273763+ijiki16@users.noreply.github.com>
+Date: Tue, 17 Nov 2026 22:24:51 +0000
+Subject: [PATCH] arm64: dts: allwinner: add OrangePi 4 Pro Armbian variant
+
+Armbian images label the rootfs armbi_root and ship an initramfs.
+Use that label in the fallback command line instead of a fixed
+PARTUUID. The Armbian boot script normally sets bootargs.
+
+Pad the DTB by 16 KiB. The vendor U-Boot adds bootargs and the
+initrd range to /chosen. Without free space it hangs with
+"could not set bootargs FDT_ERR_NOSPACE".
+
+Made with the help of an AI coding assistant (Claude).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ arch/arm64/boot/dts/allwinner/Makefile           |  3 +++
+ .../sun60i-a733-orangepi-4-pro-armbian.dts       | 16 ++++++++++++++++
+ 2 files changed, 19 insertions(+)
+ create mode 100644 arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-4-pro-armbian.dts
+
+diff --git a/arch/arm64/boot/dts/allwinner/Makefile b/arch/arm64/boot/dts/allwinner/Makefile
+index ba0832a70..6580af2f7 100644
+--- a/arch/arm64/boot/dts/allwinner/Makefile
++++ b/arch/arm64/boot/dts/allwinner/Makefile
+@@ -70,3 +70,6 @@ dtb-$(CONFIG_ARCH_SUNXI) += sun55i-t527-avaota-a1.dtb
+ dtb-$(CONFIG_ARCH_SUNXI) += sun55i-t527-orangepi-4a.dtb
+ dtb-$(CONFIG_ARCH_SUNXI) += sun60i-a733-orangepi-4-pro.dtb
+ dtb-$(CONFIG_ARCH_SUNXI) += sun60i-a733-orangepi-4-pro-sd.dtb
++dtb-$(CONFIG_ARCH_SUNXI) += sun60i-a733-orangepi-4-pro-armbian.dtb
++# U-Boot adds bootargs and initrd to /chosen; give it room
++DTC_FLAGS_sun60i-a733-orangepi-4-pro-armbian := -p 16384
+diff --git a/arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-4-pro-armbian.dts b/arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-4-pro-armbian.dts
+new file mode 100644
+index 000000000..e7aa5a14d
+--- /dev/null
++++ b/arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-4-pro-armbian.dts
+@@ -0,0 +1,16 @@
++// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
++/*
++ * Orange Pi 4 Pro, Armbian image (mainline kernel).
++ *
++ * Same as the SD-card variant. The fallback command line finds the
++ * rootfs by its Armbian label through the initramfs.
++ * The Armbian boot script normally sets bootargs.
++ */
++
++#include "sun60i-a733-orangepi-4-pro-sd.dts"
++
++/ {
++	chosen {
++		bootargs = "root=LABEL=armbi_root rootwait rootfstype=ext4 console=ttyS0,115200n8 console=tty1 consoleblank=0 loglevel=1 clk_ignore_unused swiotlb=65536 cma=512M";
++	};
++};

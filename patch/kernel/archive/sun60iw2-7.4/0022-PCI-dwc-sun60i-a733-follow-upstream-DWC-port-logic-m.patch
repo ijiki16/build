@@ -1,0 +1,115 @@
+From 3e1d9f24e14f12f78dd32b47fdff555390e049be Mon Sep 17 00:00:00 2001
+From: Iuri Jikidze <37273763+ijiki16@users.noreply.github.com>
+Date: Tue, 17 Nov 2026 15:49:47 +0000
+Subject: [PATCH 22/28] PCI: dwc: sun60i-a733: follow upstream DWC port-logic
+ macro renames
+
+Mainline renamed the DesignWare port-logic register macros after
+f47d22362. Switch the A733 host driver to the new names; every value is
+identical:
+
+  PCIE_PORT_LINK_CONTROL         -> PORT_LINK_CTRL               (0x710)
+  PORT_LINK_MODE_MASK            -> PORT_LINK_CTRL_LC_MASK       (GENMASK(21,16))
+  PORT_LINK_MODE_1_LANES         -> PORT_LINK_CTRL_LC_1_LANES
+  PCIE_PORT_DEBUG0/1             -> PORT_LINK_DEBUG0/1           (0x728/0x72C)
+  PORT_LOGIC_LTSSM_STATE_MASK    -> PORT_LINK_DEBUG0_LTSSM_MASK  (0x3f)
+  PCIE_LINK_WIDTH_SPEED_CONTROL  -> LINK_WIDTH_SPEED_CTRL        (0x80C)
+  PORT_LOGIC_LINK_WIDTH_MASK     -> LINK_WIDTH_MASK              (GENMASK(12,8))
+  PORT_LOGIC_LINK_WIDTH_1_LANES  -> LINK_WIDTH_1_LANES
+  PORT_LOGIC_SPEED_CHANGE        -> SPEED_CHANGE                 (BIT(17))
+
+Kept separate from the driver patches so they still apply unchanged.
+---
+ drivers/pci/controller/dwc/pcie-sun60i-a733.c | 44 +++++++++----------
+ 1 file changed, 22 insertions(+), 22 deletions(-)
+
+diff --git a/drivers/pci/controller/dwc/pcie-sun60i-a733.c b/drivers/pci/controller/dwc/pcie-sun60i-a733.c
+index 1c04a292d..22e9ea3cc 100644
+--- a/drivers/pci/controller/dwc/pcie-sun60i-a733.c
++++ b/drivers/pci/controller/dwc/pcie-sun60i-a733.c
+@@ -238,13 +238,13 @@ static const struct dw_pcie_ops sun60i_a733_pcie_ops = {
+ static void sun60i_a733_pcie_dump_link(struct dw_pcie *pci, const char *tag)
+ {
+ 	int cap = dw_pcie_find_capability(pci, PCI_CAP_ID_EXP);
+-	u32 dbg0 = dw_pcie_readl_dbi(pci, PCIE_PORT_DEBUG0);
+-	u32 dbg1 = dw_pcie_readl_dbi(pci, PCIE_PORT_DEBUG1);
++	u32 dbg0 = dw_pcie_readl_dbi(pci, PORT_LINK_DEBUG0);
++	u32 dbg1 = dw_pcie_readl_dbi(pci, PORT_LINK_DEBUG1);
+ 
+ 	dev_info(pci->dev,
+ 		 "dbg: %s DEBUG0=%08x ltssm=%s DEBUG1=%08x LNKCAP=%08x LNKCTL2=%08x LNKSTA=%04x\n",
+ 		 tag, dbg0,
+-		 dw_pcie_ltssm_status_string(FIELD_GET(PORT_LOGIC_LTSSM_STATE_MASK, dbg0)),
++		 dw_pcie_ltssm_status_string(FIELD_GET(PORT_LINK_DEBUG0_LTSSM_MASK, dbg0)),
+ 		 dbg1, dw_pcie_readl_dbi(pci, cap + PCI_EXP_LNKCAP),
+ 		 dw_pcie_readl_dbi(pci, cap + PCI_EXP_LNKCTL2),
+ 		 dw_pcie_readw_dbi(pci, cap + PCI_EXP_LNKSTA));
+@@ -314,15 +314,15 @@ static void sun60i_a733_pcie_vendor_init(struct sun60i_a733_pcie *pcie)
+ 	dw_pcie_writel_dbi(pci, cap + PCI_EXP_LNKCAP, val);
+ 	dw_pcie_dbi_ro_wr_dis(pci);
+ 
+-	val = dw_pcie_readl_dbi(pci, PCIE_PORT_LINK_CONTROL);
+-	val &= ~PORT_LINK_MODE_MASK;
+-	val |= PORT_LINK_MODE_1_LANES;
+-	dw_pcie_writel_dbi(pci, PCIE_PORT_LINK_CONTROL, val);
++	val = dw_pcie_readl_dbi(pci, PORT_LINK_CTRL);
++	val &= ~PORT_LINK_CTRL_LC_MASK;
++	val |= PORT_LINK_CTRL_LC_1_LANES;
++	dw_pcie_writel_dbi(pci, PORT_LINK_CTRL, val);
+ 
+-	val = dw_pcie_readl_dbi(pci, PCIE_LINK_WIDTH_SPEED_CONTROL);
+-	val &= ~PORT_LOGIC_LINK_WIDTH_MASK;
+-	val |= PORT_LOGIC_LINK_WIDTH_1_LANES;
+-	dw_pcie_writel_dbi(pci, PCIE_LINK_WIDTH_SPEED_CONTROL, val);
++	val = dw_pcie_readl_dbi(pci, LINK_WIDTH_SPEED_CTRL);
++	val &= ~LINK_WIDTH_MASK;
++	val |= LINK_WIDTH_1_LANES;
++	dw_pcie_writel_dbi(pci, LINK_WIDTH_SPEED_CTRL, val);
+ 
+ 	/* Root-port configuration while the link is down (setup_rc). */
+ 	dw_pcie_writel_dbi(pci, PCI_BASE_ADDRESS_0, 0x00000004);
+@@ -348,9 +348,9 @@ static void sun60i_a733_pcie_vendor_init(struct sun60i_a733_pcie *pcie)
+ 
+ 	dw_pcie_writew_dbi(pci, PCI_CLASS_DEVICE, PCI_CLASS_BRIDGE_PCI);
+ 
+-	val = dw_pcie_readl_dbi(pci, PCIE_LINK_WIDTH_SPEED_CONTROL);
+-	val |= PORT_LOGIC_SPEED_CHANGE;
+-	dw_pcie_writel_dbi(pci, PCIE_LINK_WIDTH_SPEED_CONTROL, val);
++	val = dw_pcie_readl_dbi(pci, LINK_WIDTH_SPEED_CTRL);
++	val |= SPEED_CHANGE;
++	dw_pcie_writel_dbi(pci, LINK_WIDTH_SPEED_CTRL, val);
+ 
+ 	sun60i_a733_pcie_ltssm_enable(pcie);
+ 
+@@ -364,15 +364,15 @@ static void sun60i_a733_pcie_vendor_init(struct sun60i_a733_pcie *pcie)
+ 	dw_pcie_writel_dbi(pci, cap + PCI_EXP_LNKCTL2, val);
+ 	dw_pcie_dbi_ro_wr_dis(pci);
+ 
+-	val = dw_pcie_readl_dbi(pci, PCIE_LINK_WIDTH_SPEED_CONTROL);
+-	val &= ~PORT_LOGIC_SPEED_CHANGE;
+-	dw_pcie_writel_dbi(pci, PCIE_LINK_WIDTH_SPEED_CONTROL, val);
+-	val |= PORT_LOGIC_SPEED_CHANGE;
+-	dw_pcie_writel_dbi(pci, PCIE_LINK_WIDTH_SPEED_CONTROL, val);
++	val = dw_pcie_readl_dbi(pci, LINK_WIDTH_SPEED_CTRL);
++	val &= ~SPEED_CHANGE;
++	dw_pcie_writel_dbi(pci, LINK_WIDTH_SPEED_CTRL, val);
++	val |= SPEED_CHANGE;
++	dw_pcie_writel_dbi(pci, LINK_WIDTH_SPEED_CTRL, val);
+ 
+ 	for (i = 0; i < 20; i++) {
+-		val = dw_pcie_readl_dbi(pci, PCIE_LINK_WIDTH_SPEED_CONTROL);
+-		if (!(val & PORT_LOGIC_SPEED_CHANGE))
++		val = dw_pcie_readl_dbi(pci, LINK_WIDTH_SPEED_CTRL);
++		if (!(val & SPEED_CHANGE))
+ 			break;
+ 		msleep(1);
+ 	}
+@@ -380,7 +380,7 @@ static void sun60i_a733_pcie_vendor_init(struct sun60i_a733_pcie *pcie)
+ 	dev_info(pci->dev, "dbg: vendor bringup link=%d LNKSTA=%04x lwcs=%08x\n",
+ 		 sun60i_a733_pcie_link_up(pci),
+ 		 dw_pcie_readw_dbi(pci, cap + PCI_EXP_LNKSTA),
+-		 dw_pcie_readl_dbi(pci, PCIE_LINK_WIDTH_SPEED_CONTROL));
++		 dw_pcie_readl_dbi(pci, LINK_WIDTH_SPEED_CTRL));
+ }
+ 
+ static int sun60i_a733_pcie_hw_init(struct dw_pcie_rp *pp)

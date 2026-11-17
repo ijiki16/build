@@ -1,0 +1,64 @@
+From e8a680bc11e88ead27d632b1ed9ef2326124df60 Mon Sep 17 00:00:00 2001
+From: tumredsun <tumredsun@localhost>
+Date: Wed, 21 Oct 2026 13:51:29 +0000
+Subject: [PATCH 14/28] ARM: dts: sunxi: enable SerDes and PCIe on the OrangePi
+ 4 Pro
+
+---
+ .../allwinner/sun60i-a733-orangepi-4-pro.dts  | 37 +++++++++++++++++++
+ 1 file changed, 37 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-4-pro.dts b/arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-4-pro.dts
+index 26d24d939..745bbdbc7 100644
+--- a/arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-4-pro.dts
++++ b/arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-4-pro.dts
+@@ -27,12 +27,49 @@ reg_gmac3v3: regulator-gmac-3v3 {
+ 		regulator-max-microvolt = <3300000>;
+ 		regulator-always-on;
+ 	};
++
++	reg_pcie3v3: regulator-pcie-3v3 {
++		compatible = "regulator-fixed";
++		regulator-name = "pcie-3v3";
++		regulator-min-microvolt = <3300000>;
++		regulator-max-microvolt = <3300000>;
++		regulator-always-on;
++	};
++
++	reg_pcie1v8: regulator-pcie-1v8 {
++		compatible = "regulator-fixed";
++		regulator-name = "pcie-1v8";
++		regulator-min-microvolt = <1800000>;
++		regulator-max-microvolt = <1800000>;
++		regulator-always-on;
++	};
++
++	reg_serdes1v8: regulator-serdes-1v8 {
++		compatible = "regulator-fixed";
++		regulator-name = "serdes-1v8";
++		regulator-min-microvolt = <1800000>;
++		regulator-max-microvolt = <1800000>;
++		regulator-always-on;
++	};
+ };
+ 
+ &uart0 {
+ 	status = "okay";
+ };
+ 
++&serdes {
++	serdes1v8-supply = <&reg_serdes1v8>;
++	status = "okay";
++};
++
++&pcie {
++	vpcie3v3-supply = <&reg_pcie3v3>;
++	vpcie1v8-supply = <&reg_pcie1v8>;
++	reset-gpios = <&pio 3 22 GPIO_ACTIVE_LOW>; /* PD22 */
++	wake-gpios = <&pio 3 21 GPIO_ACTIVE_HIGH>; /* PD21 */
++	status = "okay";
++};
++
+ &mmc0 {
+ 	cd-gpios = <&pio 5 6 GPIO_ACTIVE_LOW>; /* PF6 */
+ 	bus-width = <4>;

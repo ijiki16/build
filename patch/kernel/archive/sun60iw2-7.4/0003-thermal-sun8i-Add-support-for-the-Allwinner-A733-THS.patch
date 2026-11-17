@@ -1,0 +1,172 @@
+From 0ca0169d4e8c8dc59b9d29dbc62cd7be4f40a487 Mon Sep 17 00:00:00 2001
+From: tumredsun <tumredsun@localhost>
+Date: Tue, 20 Oct 2026 15:51:57 +0000
+Subject: [PATCH 03/28] thermal: sun8i: Add support for the Allwinner A733 THS
+
+The A733 THS is H616-family compatible: five sensors, bus clock and
+reset, 24 MHz module clock, same register set and programming.
+Temperature conversion uses a piecewise linear formula (inflection at
+sensor code 1769) as found in the BSP driver.
+
+Factory calibration data lives in the SID as three 32-bit words (at
+offsets 0x44-0x4c) with the FT temperature in word 0's lower 12 bits
+and the sensor register values packed with 4-bit strides across the
+neighbouring words.
+---
+ .../thermal/allwinner,sun8i-a83t-ths.yaml     |  2 +
+ drivers/thermal/sun8i_thermal.c               | 94 ++++++++++++++++++-
+ 2 files changed, 95 insertions(+), 1 deletion(-)
+
+diff --git a/Documentation/devicetree/bindings/thermal/allwinner,sun8i-a83t-ths.yaml b/Documentation/devicetree/bindings/thermal/allwinner,sun8i-a83t-ths.yaml
+index 3e61689f6..65171951e 100644
+--- a/Documentation/devicetree/bindings/thermal/allwinner,sun8i-a83t-ths.yaml
++++ b/Documentation/devicetree/bindings/thermal/allwinner,sun8i-a83t-ths.yaml
+@@ -24,6 +24,7 @@ properties:
+       - allwinner,sun50i-h5-ths
+       - allwinner,sun50i-h6-ths
+       - allwinner,sun50i-h616-ths
++      - allwinner,sun60i-a733-ths
+ 
+   clocks:
+     minItems: 1
+@@ -72,6 +73,7 @@ allOf:
+               - allwinner,sun50i-a100-ths
+               - allwinner,sun50i-h6-ths
+               - allwinner,sun50i-h616-ths
++              - allwinner,sun60i-a733-ths
+ 
+     then:
+       properties:
+diff --git a/drivers/thermal/sun8i_thermal.c b/drivers/thermal/sun8i_thermal.c
+index b3f551e02..45a7a0687 100644
+--- a/drivers/thermal/sun8i_thermal.c
++++ b/drivers/thermal/sun8i_thermal.c
+@@ -25,7 +25,7 @@
+ 
+ #include "thermal_hwmon.h"
+ 
+-#define MAX_SENSOR_NUM	4
++#define MAX_SENSOR_NUM	5
+ 
+ #define FT_TEMP_MASK				GENMASK(11, 0)
+ #define TEMP_CALIB_MASK				GENMASK(11, 0)
+@@ -114,6 +114,20 @@ static int sun50i_h5_calc_temp(struct ths_device *tmdev,
+ 		return -1590 * reg / 10 + 276000;
+ }
+ 
++/*
++ * The A733 factory calibration sensor data is piecewise linear with an
++ * inflection point beyond the sensor reading of 1769. Derived from the
++ * BSP driver, unit is milli-degree Celsius.
++ */
++static int sun60i_a733_calc_temp(struct ths_device *tmdev,
++				 int id, int reg)
++{
++	if (reg > 1769)
++		return (reg - 2822) * -62;
++	else
++		return (reg - 2835) * -59;
++}
++
+ static int sun8i_ths_get_temp(struct thermal_zone_device *tz, int *temp)
+ {
+ 	struct tsensor *s = thermal_zone_device_priv(tz);
+@@ -298,6 +312,72 @@ static int sun50i_h6_ths_calibrate(struct ths_device *tmdev,
+ 	return 0;
+ }
+ 
++/*
++ * The A733 stores 12 bytes of thermal calibration data in the SID, three
++ * consecutive 32-bit words (at offsets 0x44, 0x48 and 0x4c). Word 0
++ * contains the factory calibration temperature in the lower 12 bits,
++ * the sensor register values are packed with 4-bit strides across the
++ * neighbouring words.
++ */
++static int sun60i_a733_ths_calibrate(struct ths_device *tmdev,
++				     u16 *caldata, int callen)
++{
++	struct device *dev = tmdev->dev;
++	int i, ft_temp;
++	u32 w0, w1, w2;
++
++	if (callen < 12)
++		return -EINVAL;
++
++	w0 = caldata[0] | (caldata[1] << 16);
++	w1 = caldata[2] | (caldata[3] << 16);
++	w2 = caldata[4] | (caldata[5] << 16);
++
++	ft_temp = w0 & FT_TEMP_MASK;
++	if (!ft_temp)
++		return -EINVAL;
++
++	for (i = 0; i < tmdev->chip->sensor_num; i++) {
++		int sensor_reg, sensor_temp, delta, cdata, offset;
++
++		switch (i) {
++		case 0:
++			sensor_reg = (w0 >> 12) & TEMP_CALIB_MASK;
++			break;
++		case 1:
++			sensor_reg = ((w0 >> 24) | (w1 << 8)) & TEMP_CALIB_MASK;
++			break;
++		case 2:
++			sensor_reg = (w1 >> 4) & TEMP_CALIB_MASK;
++			break;
++		case 3:
++			sensor_reg = (w1 >> 16) & TEMP_CALIB_MASK;
++			break;
++		case 4:
++			sensor_reg = ((w1 >> 28) | (w2 << 4)) & TEMP_CALIB_MASK;
++			break;
++		default:
++			return 0;
++		}
++
++		sensor_temp = tmdev->chip->calc_temp(tmdev, i, sensor_reg);
++		delta = (ft_temp * 100 - sensor_temp) / 62;
++		cdata = CALIBRATE_DEFAULT - delta;
++		if (cdata & ~TEMP_CALIB_MASK) {
++			dev_warn(dev, "sensor%d is not calibrated.\n", i);
++			continue;
++		}
++
++		offset = (i % 2) * 16;
++		regmap_update_bits(tmdev->regmap,
++				   SUN50I_H6_THS_TEMP_CALIB + (i / 2 * 4),
++				   TEMP_CALIB_MASK << offset,
++				   cdata << offset);
++	}
++
++	return 0;
++}
++
+ static int sun8i_ths_calibrate(struct ths_device *tmdev)
+ {
+ 	struct nvmem_cell *calcell;
+@@ -708,6 +788,17 @@ static const struct ths_thermal_chip sun50i_h616_ths = {
+ 	.calc_temp = sun8i_ths_calc_temp,
+ };
+ 
++static const struct ths_thermal_chip sun60i_a733_ths = {
++	.sensor_num = 5,
++	.has_bus_clk_reset = true,
++	.has_mod_clk = true,
++	.temp_data_base = SUN50I_H6_THS_TEMP_DATA,
++	.calibrate = sun60i_a733_ths_calibrate,
++	.init = sun50i_h6_thermal_init,
++	.irq_ack = sun50i_h6_irq_ack,
++	.calc_temp = sun60i_a733_calc_temp,
++};
++
+ static const struct of_device_id of_ths_match[] = {
+ 	{ .compatible = "allwinner,sun8i-a83t-ths", .data = &sun8i_a83t_ths },
+ 	{ .compatible = "allwinner,sun8i-h3-ths", .data = &sun8i_h3_ths },
+@@ -718,6 +809,7 @@ static const struct of_device_id of_ths_match[] = {
+ 	{ .compatible = "allwinner,sun50i-h6-ths", .data = &sun50i_h6_ths },
+ 	{ .compatible = "allwinner,sun20i-d1-ths", .data = &sun20i_d1_ths },
+ 	{ .compatible = "allwinner,sun50i-h616-ths", .data = &sun50i_h616_ths },
++	{ .compatible = "allwinner,sun60i-a733-ths", .data = &sun60i_a733_ths },
+ 	{ /* sentinel */ },
+ };
+ MODULE_DEVICE_TABLE(of, of_ths_match);

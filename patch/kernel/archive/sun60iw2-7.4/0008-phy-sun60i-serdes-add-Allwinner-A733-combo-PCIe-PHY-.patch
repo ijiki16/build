@@ -1,0 +1,473 @@
+From 0b5b702822a7045a1478a631a074c427666e8818 Mon Sep 17 00:00:00 2001
+From: tumredsun <tumredsun@localhost>
+Date: Wed, 21 Oct 2026 05:32:35 +0000
+Subject: [PATCH 08/28] phy: sun60i-serdes: add Allwinner A733 combo PCIe PHY
+ driver
+
+---
+ drivers/phy/allwinner/Kconfig                 |  12 +
+ drivers/phy/allwinner/Makefile                |   1 +
+ .../phy/allwinner/phy-sun60i-a733-serdes.c    | 425 ++++++++++++++++++
+ 3 files changed, 438 insertions(+)
+ create mode 100644 drivers/phy/allwinner/phy-sun60i-a733-serdes.c
+
+diff --git a/drivers/phy/allwinner/Kconfig b/drivers/phy/allwinner/Kconfig
+index fb584518b..6deea283c 100644
+--- a/drivers/phy/allwinner/Kconfig
++++ b/drivers/phy/allwinner/Kconfig
+@@ -57,3 +57,15 @@ config PHY_SUN50I_USB3
+ 	  part of Allwinner H6 SoC.
+ 
+ 	  This driver controls each individual USB 2+3 host PHY combo.
++
++config PHY_SUN60I_A733_SERDES
++	tristate "Allwinner A733 serdes PCIe PHY driver"
++	depends on ARCH_SUNXI || COMPILE_TEST
++	depends on HAS_IOMEM && OF
++	depends on RESET_CONTROLLER
++	select GENERIC_PHY
++	select REGULATOR
++	help
++	  Enable this to support the PCIe PHY based on the
++	  serdes/combophy subsystem of the Allwinner A733 SoC.
++	  If unsure, say Y or M.
+diff --git a/drivers/phy/allwinner/Makefile b/drivers/phy/allwinner/Makefile
+index bd74901a1..f044b2b6e 100644
+--- a/drivers/phy/allwinner/Makefile
++++ b/drivers/phy/allwinner/Makefile
+@@ -3,3 +3,4 @@ obj-$(CONFIG_PHY_SUN4I_USB)		+= phy-sun4i-usb.o
+ obj-$(CONFIG_PHY_SUN6I_MIPI_DPHY)	+= phy-sun6i-mipi-dphy.o
+ obj-$(CONFIG_PHY_SUN9I_USB)		+= phy-sun9i-usb.o
+ obj-$(CONFIG_PHY_SUN50I_USB3)		+= phy-sun50i-usb3.o
++obj-$(CONFIG_PHY_SUN60I_A733_SERDES)	+= phy-sun60i-a733-serdes.o
+diff --git a/drivers/phy/allwinner/phy-sun60i-a733-serdes.c b/drivers/phy/allwinner/phy-sun60i-a733-serdes.c
+new file mode 100644
+index 000000000..d942e689b
+--- /dev/null
++++ b/drivers/phy/allwinner/phy-sun60i-a733-serdes.c
+@@ -0,0 +1,425 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * PCIe PHY driver for the Allwinner A733 serdes/combophy subsystem.
++ *
++ * Copyright (C) 2026 tumredsun <tumredsun@localhost>
++ *
++ * The A733 PCIe controller is paired with a lane of a serdes "combophy"
++ * subsystem, which is shared between DisplayPort, USB 3.1 and PCIe.  The
++ * top level serdes block controls the power, clock and reset gating of
++ * that subsystem, while the PCIe specific lane is driven by a sequencer
++ * in the combophy block.
++ */
++
++#include <linux/clk.h>
++#include <linux/iopoll.h>
++#include <linux/kernel.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/phy/phy.h>
++#include <linux/platform_device.h>
++#include <linux/regulator/consumer.h>
++#include <linux/reset.h>
++
++/* Serdes subsystem registers, top part 1. */
++#define SUBSYS_PCIE_BGR			0x0004
++#define   SUBSYS_PCIE_GATING		(BIT(16) | BIT(17) | BIT(18))
++#define SUBSYS_DBG_CTL			0x00f0
++#define   COMBO1_PHY_REFCLK_AUTO_GATE_DIS	BIT(29)
++
++/* Serdes subsystem registers, top part 2. */
++#define SUBSYS_COMB1_PIPE		0x0c44
++#define   SUBSYS_COMB1_PIPE_PCIE	0x1
++
++/*
++ * The combophy register file is a 16-bit wide memory where the byte
++ * offset of a register is (register number * 2).
++ */
++static void a733_serdes_phy_writew(void __iomem *phy, u16 reg, u16 val)
++{
++	writew(val, phy + (reg << 1));
++}
++
++static void a733_serdes_phy_setbits(void __iomem *phy, u16 reg, u16 mask)
++{
++	u16 old;
++
++	old = readw(phy + (reg << 1));
++	writew(old | mask, phy + (reg << 1));
++}
++
++static int a733_serdes_phy_wait_ready(void __iomem *combo_top)
++{
++	u32 val;
++
++	return readl_poll_timeout(combo_top + 0x900, val, val & BIT(0),
++				  100, 200000);
++}
++
++/*
++ * The internal reference clock path is used when no reference clock is
++ * supplied by an external generator on the slot.  It is the default for
++ * this board.
++ */
++static void a733_serdes_pcie_internal_refclk_init(void __iomem *combo_top,
++						  void __iomem *phy)
++{
++	writel(0x01100001, combo_top + 0x4);
++
++	a733_serdes_phy_writew(phy, 0x22, 0x1a);
++	a733_serdes_phy_writew(phy, 0x2a, 0x34);
++	a733_serdes_phy_writew(phy, 0x2c, 0xda);
++	a733_serdes_phy_writew(phy, 0x32, 0x34);
++	a733_serdes_phy_writew(phy, 0x34, 0xda);
++
++	a733_serdes_phy_writew(phy, 0x64, 0x82);
++	a733_serdes_phy_writew(phy, 0x65, 0x82);
++
++	a733_serdes_phy_writew(phy, 0x74, 0x1a);
++
++	a733_serdes_phy_writew(phy, 0x104, 0x20);
++	a733_serdes_phy_writew(phy, 0x105, 0x7);
++	a733_serdes_phy_writew(phy, 0x10c, 0x20);
++	a733_serdes_phy_writew(phy, 0x10d, 0x7);
++	a733_serdes_phy_writew(phy, 0x114, 0x30c);
++	a733_serdes_phy_writew(phy, 0x115, 0x7);
++
++	a733_serdes_phy_writew(phy, 0x124, 0x7);
++	a733_serdes_phy_writew(phy, 0x125, 0x3);
++	a733_serdes_phy_writew(phy, 0x126, 0xf);
++	a733_serdes_phy_writew(phy, 0x128, 0x132);
++
++	a733_serdes_phy_writew(phy, 0x40c0, 0x208);
++	a733_serdes_phy_writew(phy, 0x40c2, 0x9c);
++
++	a733_serdes_phy_writew(phy, 0x8044, 0x1a);
++	a733_serdes_phy_writew(phy, 0x8045, 0x82);
++	a733_serdes_phy_writew(phy, 0x804c, 0x1a);
++	a733_serdes_phy_writew(phy, 0x804d, 0x82);
++
++	a733_serdes_phy_writew(phy, 0x4123, 0xa28);
++
++	writel(readl(combo_top + 0x100) & ~0x30, combo_top + 0x100);
++
++	a733_serdes_phy_writew(phy, 0x94, 0x4);
++	a733_serdes_phy_writew(phy, 0xa4, 0x4);
++	a733_serdes_phy_writew(phy, 0xd4, 0x4);
++
++	a733_serdes_phy_writew(phy, 0x90, 0x180);
++	a733_serdes_phy_writew(phy, 0xa0, 0x133);
++	a733_serdes_phy_writew(phy, 0xd0, 0x133);
++	a733_serdes_phy_writew(phy, 0x91, 0x9d8a);
++	a733_serdes_phy_writew(phy, 0xa1, 0xb13b);
++	a733_serdes_phy_writew(phy, 0xd1, 0xb13b);
++	a733_serdes_phy_writew(phy, 0x92, 0x2);
++	a733_serdes_phy_writew(phy, 0xa2, 0x2);
++	a733_serdes_phy_writew(phy, 0xd2, 0x2);
++	a733_serdes_phy_writew(phy, 0x93, 0x102);
++	a733_serdes_phy_writew(phy, 0xa3, 0xce);
++	a733_serdes_phy_writew(phy, 0xd3, 0xce);
++
++	a733_serdes_phy_writew(phy, 0x1a0, 0x22);
++	a733_serdes_phy_writew(phy, 0x1b0, 0x22);
++	a733_serdes_phy_writew(phy, 0x1c0, 0x22);
++
++	a733_serdes_phy_writew(phy, 0x98, 0x1);
++	a733_serdes_phy_writew(phy, 0xa8, 0x1);
++	a733_serdes_phy_writew(phy, 0xd8, 0x1);
++
++	a733_serdes_phy_writew(phy, 0x99, 0x45f);
++	a733_serdes_phy_writew(phy, 0xa9, 0x2f0);
++	a733_serdes_phy_writew(phy, 0xd9, 0x399);
++	a733_serdes_phy_writew(phy, 0x9a, 0x6b);
++	a733_serdes_phy_writew(phy, 0xaa, 0x68);
++	a733_serdes_phy_writew(phy, 0xda, 0x68);
++	a733_serdes_phy_writew(phy, 0x9b, 0x4);
++	a733_serdes_phy_writew(phy, 0xab, 0x4);
++	a733_serdes_phy_writew(phy, 0xdb, 0x4);
++
++	a733_serdes_phy_writew(phy, 0x84, 0x104);
++	a733_serdes_phy_writew(phy, 0xc4, 0x104);
++	a733_serdes_phy_writew(phy, 0x85, 0x5);
++	a733_serdes_phy_writew(phy, 0xc5, 0x5);
++	a733_serdes_phy_writew(phy, 0x86, 0x337);
++	a733_serdes_phy_writew(phy, 0xc6, 0x337);
++	a733_serdes_phy_writew(phy, 0x88, 0x3dbe);
++	a733_serdes_phy_writew(phy, 0xc8, 0x3dbe);
++	a733_serdes_phy_writew(phy, 0x82, 0x3);
++	a733_serdes_phy_writew(phy, 0xc2, 0x3);
++
++	a733_serdes_phy_writew(phy, 0x9c, 0x14);
++	a733_serdes_phy_writew(phy, 0xdc, 0x14);
++	a733_serdes_phy_writew(phy, 0x9e, 0x192);
++	a733_serdes_phy_writew(phy, 0xde, 0x192);
++	a733_serdes_phy_writew(phy, 0x9f, 0x6);
++	a733_serdes_phy_writew(phy, 0xdf, 0x6);
++
++	a733_serdes_phy_writew(phy, 0x81e0, 0x0);
++	a733_serdes_phy_writew(phy, 0x8171, 0x19);
++	a733_serdes_phy_writew(phy, 0x8172, 0x19);
++
++	a733_serdes_phy_writew(phy, 0x81ff, 0x1);
++
++	writel((readl(phy + 0x98) & ~0x3) | 0x2, phy + 0x98);
++	writel((readl(phy + 0xa8) & ~0x3) | 0x2, phy + 0xa8);
++	writel((readl(phy + 0xd8) & ~0x3) | 0x2, phy + 0xd8);
++
++	writel(readl(combo_top) | 0x1, combo_top);
++	writel(readl(combo_top + 0x100) | 0x1, combo_top + 0x100);
++}
++
++/*
++ * The external reference clock path puts the PHY in PCIe mode without
++ * starting the internal 100 MHz oscillator.
++ */
++static void a733_serdes_pcie_external_refclk_init(void __iomem *combo_top,
++						  void __iomem *phy)
++{
++	writel(0x2000, combo_top + 0x4);
++
++	writel(readl(combo_top + 0x100) & ~0x30, combo_top + 0x100);
++
++	a733_serdes_phy_writew(phy, 0x94, 0x4);
++	a733_serdes_phy_writew(phy, 0xa4, 0x4);
++	a733_serdes_phy_writew(phy, 0xd4, 0x4);
++
++	a733_serdes_phy_writew(phy, 0x90, 0x64);
++	a733_serdes_phy_writew(phy, 0xa0, 0x50);
++	a733_serdes_phy_writew(phy, 0xd0, 0x50);
++	a733_serdes_phy_writew(phy, 0x92, 0x2);
++	a733_serdes_phy_writew(phy, 0xa2, 0x2);
++	a733_serdes_phy_writew(phy, 0xd2, 0x2);
++	a733_serdes_phy_writew(phy, 0x93, 0x44);
++	a733_serdes_phy_writew(phy, 0xa3, 0x36);
++	a733_serdes_phy_writew(phy, 0xd3, 0x36);
++	a733_serdes_phy_writew(phy, 0x94, 0x2);
++	a733_serdes_phy_writew(phy, 0xa4, 0x2);
++	a733_serdes_phy_writew(phy, 0xd4, 0x2);
++
++	a733_serdes_phy_writew(phy, 0x1a0, 0x2);
++	a733_serdes_phy_writew(phy, 0x1b0, 0x2);
++	a733_serdes_phy_writew(phy, 0x1c0, 0x2);
++
++	a733_serdes_phy_writew(phy, 0x98, 0x1);
++	a733_serdes_phy_writew(phy, 0xa8, 0x1);
++	a733_serdes_phy_writew(phy, 0xd8, 0x1);
++
++	a733_serdes_phy_writew(phy, 0x99, 0x11b);
++	a733_serdes_phy_writew(phy, 0xa9, 0x11b);
++	a733_serdes_phy_writew(phy, 0xd9, 0x11b);
++	a733_serdes_phy_writew(phy, 0x9a, 0x6e);
++	a733_serdes_phy_writew(phy, 0xaa, 0x58);
++	a733_serdes_phy_writew(phy, 0xda, 0x58);
++	a733_serdes_phy_writew(phy, 0x9b, 0xe);
++	a733_serdes_phy_writew(phy, 0xab, 0x12);
++	a733_serdes_phy_writew(phy, 0xdb, 0x12);
++
++	a733_serdes_phy_writew(phy, 0x86, 0xc5e);
++	a733_serdes_phy_writew(phy, 0xc6, 0xc5e);
++	a733_serdes_phy_writew(phy, 0x88, 0xc56);
++	a733_serdes_phy_writew(phy, 0xc8, 0xc56);
++
++	a733_serdes_phy_writew(phy, 0x9c, 0xc7);
++	a733_serdes_phy_writew(phy, 0xdc, 0xc7);
++	a733_serdes_phy_writew(phy, 0x9e, 0xc7);
++	a733_serdes_phy_writew(phy, 0xde, 0xc7);
++	a733_serdes_phy_writew(phy, 0x9f, 0x5);
++	a733_serdes_phy_writew(phy, 0xdf, 0x5);
++
++	a733_serdes_phy_writew(phy, 0x81e0, 0x0);
++	a733_serdes_phy_writew(phy, 0x8171, 0x19);
++	a733_serdes_phy_writew(phy, 0x8172, 0x19);
++	a733_serdes_phy_writew(phy, 0x81ff, 0x1);
++
++	writel(readl(combo_top) | 0x1, combo_top);
++	writel(readl(combo_top + 0x100) | 0x1, combo_top + 0x100);
++}
++
++/* Done last, once the PHY sequencer reports it is up. */
++static void a733_serdes_pcie_finish(void __iomem *combo_top, void __iomem *phy)
++{
++	a733_serdes_phy_writew(phy, 0x50, 0x270);
++	a733_serdes_phy_setbits(phy, 0x4c, BIT(4));
++	a733_serdes_phy_setbits(phy, 0xc000, BIT(0));
++
++	writel(readl(combo_top + 0x4) | BIT(28), combo_top + 0x4);
++}
++
++struct a733_serdes_pcie {
++	struct phy		*phy;
++	void __iomem		*top_subsys;
++	void __iomem		*top_combo;
++	void __iomem		*combo_top;
++	void __iomem		*combo_phy;
++
++	struct clk		*serdes_clk;
++	struct clk		*dcxo_clk;
++	struct reset_control	*serdes_reset;
++	struct regulator	*vdd;
++
++	bool			ext_refclk;
++};
++
++static int a733_serdes_pcie_init(struct phy *phy)
++{
++	struct a733_serdes_pcie *serdes = phy_get_drvdata(phy);
++	u32 val;
++	int ret;
++
++	ret = regulator_enable(serdes->vdd);
++	if (ret)
++		return ret;
++
++	ret = reset_control_deassert(serdes->serdes_reset);
++	if (ret)
++		goto err_disable_regulator;
++
++	ret = clk_set_rate(serdes->serdes_clk, 100000000);
++	if (ret)
++		goto err_assert_reset;
++
++	ret = clk_prepare_enable(serdes->serdes_clk);
++	if (ret)
++		goto err_assert_reset;
++
++	ret = clk_prepare_enable(serdes->dcxo_clk);
++	if (ret)
++		goto err_disable_serdes_clk;
++
++	val = readl(serdes->top_subsys + SUBSYS_PCIE_BGR);
++	writel(val | SUBSYS_PCIE_GATING, serdes->top_subsys + SUBSYS_PCIE_BGR);
++
++	val = readl(serdes->top_subsys + SUBSYS_DBG_CTL);
++	writel(val | COMBO1_PHY_REFCLK_AUTO_GATE_DIS,
++	       serdes->top_subsys + SUBSYS_DBG_CTL);
++
++	writel(SUBSYS_COMB1_PIPE_PCIE, serdes->top_combo + SUBSYS_COMB1_PIPE);
++
++	if (serdes->ext_refclk)
++		a733_serdes_pcie_external_refclk_init(serdes->combo_top,
++						      serdes->combo_phy);
++	else
++		a733_serdes_pcie_internal_refclk_init(serdes->combo_top,
++						      serdes->combo_phy);
++
++	ret = a733_serdes_phy_wait_ready(serdes->combo_top);
++	if (ret)
++		goto err_disable_dcxo_clk;
++
++	a733_serdes_pcie_finish(serdes->combo_top, serdes->combo_phy);
++
++	return 0;
++
++err_disable_dcxo_clk:
++	clk_disable_unprepare(serdes->dcxo_clk);
++err_disable_serdes_clk:
++	clk_disable_unprepare(serdes->serdes_clk);
++err_assert_reset:
++	reset_control_assert(serdes->serdes_reset);
++err_disable_regulator:
++	regulator_disable(serdes->vdd);
++
++	return ret;
++}
++
++static int a733_serdes_pcie_exit(struct phy *phy)
++{
++	struct a733_serdes_pcie *serdes = phy_get_drvdata(phy);
++
++	reset_control_assert(serdes->serdes_reset);
++	clk_disable_unprepare(serdes->dcxo_clk);
++	clk_disable_unprepare(serdes->serdes_clk);
++	regulator_disable(serdes->vdd);
++
++	return 0;
++}
++
++static const struct phy_ops a733_serdes_pcie_ops = {
++	.init		= a733_serdes_pcie_init,
++	.exit		= a733_serdes_pcie_exit,
++	.owner		= THIS_MODULE,
++};
++
++static int a733_serdes_pcie_probe(struct platform_device *pdev)
++{
++	struct a733_serdes_pcie *serdes;
++	struct phy_provider *provider;
++	struct device *dev = &pdev->dev;
++	int ret;
++
++	serdes = devm_kzalloc(dev, sizeof(*serdes), GFP_KERNEL);
++	if (!serdes)
++		return -ENOMEM;
++
++	serdes->top_subsys = devm_platform_ioremap_resource(pdev, 0);
++	if (IS_ERR(serdes->top_subsys))
++		return PTR_ERR(serdes->top_subsys);
++
++	serdes->top_combo = devm_platform_ioremap_resource(pdev, 1);
++	if (IS_ERR(serdes->top_combo))
++		return PTR_ERR(serdes->top_combo);
++
++	serdes->combo_top = devm_platform_ioremap_resource(pdev, 2);
++	if (IS_ERR(serdes->combo_top))
++		return PTR_ERR(serdes->combo_top);
++
++	serdes->combo_phy = devm_platform_ioremap_resource(pdev, 3);
++	if (IS_ERR(serdes->combo_phy))
++		return PTR_ERR(serdes->combo_phy);
++
++	serdes->serdes_clk = devm_clk_get(dev, "serdes-clk");
++	if (IS_ERR(serdes->serdes_clk))
++		return dev_err_probe(dev, PTR_ERR(serdes->serdes_clk),
++				     "failed to get serdes clock\n");
++
++	serdes->dcxo_clk = devm_clk_get(dev, "dcxo-serdes1-clk");
++	if (IS_ERR(serdes->dcxo_clk))
++		return dev_err_probe(dev, PTR_ERR(serdes->dcxo_clk),
++				     "failed to get serdes dcxo clock\n");
++
++	serdes->serdes_reset =
++		devm_reset_control_get_shared(dev, "serdes-reset");
++	if (IS_ERR(serdes->serdes_reset))
++		return dev_err_probe(dev, PTR_ERR(serdes->serdes_reset),
++				     "failed to get serdes reset\n");
++
++	serdes->vdd = devm_regulator_get_optional(dev, "serdes1v8");
++	if (IS_ERR(serdes->vdd)) {
++		ret = PTR_ERR(serdes->vdd);
++		if (ret != -ENODEV)
++			return ret;
++		serdes->vdd = NULL;
++	}
++
++	serdes->ext_refclk = device_property_read_bool(dev,
++						       "ext-refclk");
++
++	serdes->phy = devm_phy_create(dev, NULL, &a733_serdes_pcie_ops);
++	if (IS_ERR(serdes->phy))
++		return PTR_ERR(serdes->phy);
++
++	phy_set_drvdata(serdes->phy, serdes);
++
++	provider = devm_of_phy_provider_register(dev, of_phy_simple_xlate);
++
++	return PTR_ERR_OR_ZERO(provider);
++}
++
++static const struct of_device_id a733_serdes_pcie_of_match_table[] = {
++	{ .compatible = "allwinner,sun60i-a733-serdes" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, a733_serdes_pcie_of_match_table);
++
++static struct platform_driver a733_serdes_pcie_driver = {
++	.probe		= a733_serdes_pcie_probe,
++	.driver = {
++		.name		= "sun60i-a733-serdes-phy",
++		.of_match_table	= a733_serdes_pcie_of_match_table,
++	},
++};
++module_platform_driver(a733_serdes_pcie_driver);
++
++MODULE_AUTHOR("tumredsun <tumredsun@localhost>");
++MODULE_DESCRIPTION("Allwinner A733 serdes PCIe PHY driver");
++MODULE_LICENSE("GPL");

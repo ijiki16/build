@@ -1,0 +1,52 @@
+From aa5421175f4f23046d780294bc1c35558d0a94f0 Mon Sep 17 00:00:00 2001
+From: Iuri Jikidze <37273763+ijiki16@users.noreply.github.com>
+Date: Tue, 17 Nov 2026 23:38:51 +0000
+Subject: [PATCH 28/28] arm64: dts: allwinner: a733: reserve the BL31 secure
+ monitor
+
+The vendor boot0/boot_package loads BL31 at 0x48000000 and the vendor
+DT reserves 16 MiB there (sun60iw2p1.dtsi). The mainline dtsi has no
+reserved-memory node, so Linux treats that range as normal RAM. The
+kernel can then allocate over the running secure monitor.
+
+The same gap broke booting with an initrd. U-Boot moved a 34 MB
+initrd to 0x47e10000..0x49fff46b, over BL31, and the board hung
+after "Starting kernel".
+
+Reserve the range as no-map.
+
+Tested on an OrangePi 4 Pro: dmesg shows "reserved mem:
+0x48000000..0x48ffffff (16384 KiB) nomap non-reusable bl31@48000000",
+and the board boots Armbian (trixie) with an initrd.
+
+Made with the help of an AI coding assistant (Claude).
+
+Fixes: 0f334f298667 ("ARM: dts: sunxi: Add Allwinner A733 device tree")
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi b/arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi
+index 6c7c3fe78..c0469535e 100644
+--- a/arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi
++++ b/arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi
+@@ -15,6 +15,18 @@ / {
+ 	#address-cells = <2>;
+ 	#size-cells = <2>;
+ 
++	reserved-memory {
++		#address-cells = <2>;
++		#size-cells = <2>;
++		ranges;
++
++		/* Secure monitor (BL31), loaded here by the vendor boot0/boot_package. */
++		bl31@48000000 {
++			reg = <0x0 0x48000000 0x0 0x01000000>;
++			no-map;
++		};
++	};
++
+ 	cpus {
+ 		#address-cells = <1>;
+ 		#size-cells = <0>;

@@ -1,0 +1,36 @@
+From b9e69a5e21b8ccfb0ea3d5a2c378d6b2f9ba7fea Mon Sep 17 00:00:00 2001
+From: Iuri Jikidze <37273763+ijiki16@users.noreply.github.com>
+Date: Tue, 17 Nov 2026 22:14:59 +0000
+Subject: [PATCH 26/28] clk: a733 bringup: print clock gate traces with
+ pr_debug
+
+The bringup trace hook clk_pcie_watch() printed every clock
+enable/disable at KERN_EMERG. Once mmc0 runs with broken-cd (polled card
+detect), that is several lines per second on the serial console, which
+"dmesg -n" cannot silence and which makes the console unusable as a
+shell. Use pr_debug so the traces are still available through dynamic
+debug.
+
+Tested on an OrangePi 4 Pro: the console is quiet after boot.
+
+This change was made with the help of an AI coding assistant (Claude).
+
+Fixes: 5b6b6ef36ff2 ("stmmac/dwmac-sun60i: snps,dwmac-5.20 compat + EXT gmii clock + PHY reset - MDIO was reading wrong core type (DWMAC100 vs real GMAC4, Synopsys 0x53) dts/opi4pro: drop init=/bin/sh, restore normal sysvinit/OpenRC boot")
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/clk/clk.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/clk/clk.c b/drivers/clk/clk.c
+index 5eff0ca3c..0f06254c7 100644
+--- a/drivers/clk/clk.c
++++ b/drivers/clk/clk.c
+@@ -1253,7 +1253,7 @@ int clk_pcie_watch(const char *cmd, const char *name);
+ 
+ int clk_pcie_watch(const char *cmd, const char *name)
+ {
+-	pr_emerg("a733-clk: %s %s\n", cmd, name);
++	pr_debug("a733-clk: %s %s\n", cmd, name);
+ 	return 0;
+ }
+ EXPORT_SYMBOL_GPL(clk_pcie_watch);
