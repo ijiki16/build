@@ -1,4 +1,4 @@
-From 776220bd87269f4f1dfdbb333beb169b2021d916 Mon Sep 17 00:00:00 2001
+From 2586fa23c91ab217ce8cb20ee36c896f4a5363e5 Mon Sep 17 00:00:00 2001
 From: Andre Przywara <andre.przywara@arm.com>
 Date: Thu, 10 Sep 2026 11:31:11 +0200
 Subject: [PATCH 32/35] mfd: axp20x: Add support for AXP318W PMIC

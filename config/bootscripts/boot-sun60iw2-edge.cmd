@@ -3,8 +3,7 @@
 # Please edit /boot/armbianEnv.txt to set supported parameters
 #
 # sun60iw2 mainline (edge) kernel, booted by the vendor U-Boot 2018.
-# This U-Boot corrupts the FDT on "fdt resize" / "fdt apply", so DT overlays are not supported.
-# If U-Boot does not pass bootargs, the kernel uses the DTB /chosen command line (root=LABEL=armbi_root).
+# DT overlays are not supported. The DTB is built with free space for U-Boot to add bootargs and the initrd.
 
 setenv kernel_addr_r "0x41000000"
 setenv fdt_addr_r "0x4a000000"

@@ -1,4 +1,4 @@
-From 2db1ca5ffee85faa3f6fc4e8e123ca50851bea0c Mon Sep 17 00:00:00 2001
+From d98cfeec4c7625a8b54f713adcceaff099049dbc Mon Sep 17 00:00:00 2001
 From: Iuri Jikidze <37273763+ijiki16@users.noreply.github.com>
 Date: Tue, 17 Nov 2026 23:52:35 +0000
 Subject: [PATCH 35/35] arm64: dts: allwinner: orangepi-4-pro-sd: use the
@@ -28,7 +28,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  1 file changed, 33 insertions(+), 26 deletions(-)
 
 diff --git a/arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-4-pro-sd.dts b/arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-4-pro-sd.dts
-index 1befd180f..b5329e795 100644
+index 9d6f8b77f..a652d0cb8 100644
 --- a/arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-4-pro-sd.dts
 +++ b/arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-4-pro-sd.dts
 @@ -6,16 +6,15 @@
@@ -53,8 +53,8 @@ index 1befd180f..b5329e795 100644
   */
  
  #include "sun60i-a733-orangepi-4-pro.dts"
-@@ -28,27 +27,9 @@ chosen {
- 		 */
+@@ -25,27 +24,9 @@ chosen {
+ 		/* Used when the boot script leaves bootargs empty. */
  		bootargs = "root=PARTUUID=e86ba129-01 rootwait rootfstype=ext4 earlycon=uart8250,mmio32,0x02500000 console=ttyS0,115200n8 console=tty1 consoleblank=0 loglevel=7 printk.time=1 clk_ignore_unused swiotlb=65536 cma=512M panic=10";
  	};
 -
@@ -82,7 +82,7 @@ index 1befd180f..b5329e795 100644
  &r_pio {
  	r_i2c0_pins: r-i2c0-pins {
  		pins = "PL0", "PL1";
-@@ -73,6 +54,31 @@ r_i2c0: i2c@7083000 {
+@@ -70,6 +51,31 @@ r_i2c0: i2c@7083000 {
  		#address-cells = <1>;
  		#size-cells = <0>;
  		status = "okay";
@@ -114,7 +114,7 @@ index 1befd180f..b5329e795 100644
  	};
  };
  
-@@ -113,6 +119,7 @@ &gpu {
+@@ -110,6 +116,7 @@ &gpu {
   * clk_csr = 4: 200 MHz / 102 = ~2 MHz.
   */
  &gmac0 {
@@ -122,7 +122,7 @@ index 1befd180f..b5329e795 100644
  	snps,clk-csr = <4>;
  	/* without it stmmac finds no PHY at open, though YT8531 binds */
  	phy-handle = <&gmac0_phy0>;
-@@ -164,7 +171,7 @@ &mmc0 {
+@@ -161,7 +168,7 @@ &mmc0 {
  	 * instead: the rootfs card never leaves the slot.
  	 */
  	broken-cd;

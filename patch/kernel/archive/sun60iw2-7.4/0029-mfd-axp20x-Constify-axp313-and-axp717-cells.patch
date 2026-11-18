@@ -1,4 +1,4 @@
-From a9c606cc868a2b3dc5b7ee53e8db5e3971a67592 Mon Sep 17 00:00:00 2001
+From c9fc24b0bf8ee387a94a601c88409791695f8358 Mon Sep 17 00:00:00 2001
 From: Jerome Brunet <jbrunet@baylibre.com>
 Date: Thu, 10 Sep 2026 11:31:08 +0200
 Subject: [PATCH 29/35] mfd: axp20x: Constify axp313 and axp717 cells

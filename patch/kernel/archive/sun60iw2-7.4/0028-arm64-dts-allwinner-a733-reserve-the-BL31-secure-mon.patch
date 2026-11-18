@@ -1,4 +1,4 @@
-From aa5421175f4f23046d780294bc1c35558d0a94f0 Mon Sep 17 00:00:00 2001
+From 85ba2c1cf5a10617696804e1055137824338db45 Mon Sep 17 00:00:00 2001
 From: Iuri Jikidze <37273763+ijiki16@users.noreply.github.com>
 Date: Tue, 17 Nov 2026 23:38:51 +0000
 Subject: [PATCH 28/35] arm64: dts: allwinner: a733: reserve the BL31 secure

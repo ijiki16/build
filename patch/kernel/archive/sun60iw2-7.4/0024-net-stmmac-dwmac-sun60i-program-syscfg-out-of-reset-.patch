@@ -1,11 +1,12 @@
-From 7e558ef59cc14ff4a2f2d693a6e3042546568e90 Mon Sep 17 00:00:00 2001
+From ef1719208a431258f48915768144be85183a0c6d Mon Sep 17 00:00:00 2001
 From: Iuri Jikidze <37273763+ijiki16@users.noreply.github.com>
 Date: Tue, 17 Nov 2026 22:14:58 +0000
 Subject: [PATCH 24/35] net: stmmac: dwmac-sun60i: program syscfg out of reset,
  enable PHY clock
 
-Two problems kept the external RGMII PHY unreachable on the OrangePi 4
-Pro ("mdio_bus stmmac-0: MDIO device at address 1 is missing"):
+Fix two differences from the vendor glue. They were found while the
+external RGMII PHY on the OrangePi 4 Pro was unreachable ("mdio_bus
+stmmac-0: MDIO device at address 1 is missing"):
 
 1. sun60i_gmac_syscfg() wrote the glue register while the GMAC bus
    clock was gated and its bus reset asserted. The write is dropped and
@@ -18,8 +19,9 @@ Pro ("mdio_bus stmmac-0: MDIO device at address 1 is missing"):
 2. The 25 MHz PHY reference fanout (CCU GMAC0_PHY_CLK, routed to PH15
    "RGMII0-EPHY-25/50M") is listed as the "phy" clock but nothing enables
    it; it resets gated (0x1410 = 0x00000005). The vendor driver enables
-   it when "aw,soc-phy-clk-en" is set, and the OrangePi 4 Pro's YT8531C
-   is clocked from it. Enable it when present.
+   it when "aw,soc-phy-clk-en" is set, and the vendor OrangePi 4 Pro DT
+   sets that. Enable it when present. Whether this board needs the clock
+   is untested: its schematic also shows a crystal on the PHY.
 
 With both, the glue register reads 0x00011145 (identical to the vendor
 6.6 kernel), the MAC reports "Active PHY interface: RGMII (1)", and the
@@ -39,11 +41,11 @@ and mainline kernels on the board.
 Fixes: b14cbb33a230 ("net: stmmac: add Allwinner A733 GMAC-210 glue")
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
- .../ethernet/stmicro/stmmac/dwmac-sun60i.c    | 38 +++++++++++++++++--
- 1 file changed, 34 insertions(+), 4 deletions(-)
+ .../ethernet/stmicro/stmmac/dwmac-sun60i.c    | 37 +++++++++++++++++--
+ 1 file changed, 33 insertions(+), 4 deletions(-)
 
 diff --git a/drivers/net/ethernet/stmicro/stmmac/dwmac-sun60i.c b/drivers/net/ethernet/stmicro/stmmac/dwmac-sun60i.c
-index b8846ae6e..bc6037f55 100644
+index b8846ae6e..5bb7d0e5d 100644
 --- a/drivers/net/ethernet/stmicro/stmmac/dwmac-sun60i.c
 +++ b/drivers/net/ethernet/stmicro/stmmac/dwmac-sun60i.c
 @@ -18,6 +18,7 @@
@@ -62,7 +64,7 @@ index b8846ae6e..bc6037f55 100644
  	struct clk *clk;
  	void __iomem *syscfg_base;
  	int ret;
-@@ -122,15 +124,43 @@ static int sun60i_gmac_probe(struct platform_device *pdev)
+@@ -122,15 +124,42 @@ static int sun60i_gmac_probe(struct platform_device *pdev)
  	plat_dat->flags |= STMMAC_FLAG_SPH_DISABLE;
  	plat_dat->host_dma_width = 32;
  
@@ -94,9 +96,8 @@ index b8846ae6e..bc6037f55 100644
 +				     "Failed to deassert GMAC bus reset\n");
 +
 +	/*
-+	 * 25 MHz PHY reference fanout (PH15, "aw,soc-phy-clk-en" in the vendor
-+	 * DT). The OrangePi 4 Pro's YT8531C is clocked from it; it is gated at
-+	 * reset and nothing else enables it.
++	 * 25 MHz PHY reference fanout (PH15). It is gated at reset and nothing
++	 * else enables it. The vendor DT enables it with "aw,soc-phy-clk-en".
 +	 */
 +	clk = devm_clk_get_optional_enabled(dev, "phy");
 +	if (IS_ERR(clk))
