@@ -1,7 +1,7 @@
 From 9cb44f44ee18ab3cc9e7c74239466956102156c5 Mon Sep 17 00:00:00 2001
 From: tumredsun <tumredsun@localhost>
 Date: Wed, 21 Oct 2026 22:12:18 +0000
-Subject: [PATCH 15/28] arm64/a733 bringup: head.S pre-MMU UART trace + cache
+Subject: [PATCH 15/35] arm64/a733 bringup: head.S pre-MMU UART trace + cache
  fix; DT memory@40000000 fallback
 
 head.S: dcache_inval_poc -> dcache_clean_poc for init_pg_dir/reserved/init_idmap (PMU fix, cf. jonas5 opi4pro-7.1.5); dsb+isb before and after set_sctlr_el1; pre-MMU UART debug puts (0x02500000, A/B/B1/B2/B4/M1). dts: add /memory@40000000 fallback node (workaround for zero-RAM boot until completion_id_init_idmap is reliable).

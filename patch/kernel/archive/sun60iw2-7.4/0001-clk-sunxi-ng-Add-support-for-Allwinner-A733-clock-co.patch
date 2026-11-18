@@ -1,7 +1,7 @@
 From fb322717080443407571d986fcc45d08d0a8f081 Mon Sep 17 00:00:00 2001
 From: tumredsun <tumredsun@localhost>
 Date: Tue, 20 Oct 2026 15:20:43 +0000
-Subject: [PATCH 01/28] clk: sunxi-ng: Add support for Allwinner A733 clock
+Subject: [PATCH 01/35] clk: sunxi-ng: Add support for Allwinner A733 clock
  control unit
 
 Add DT-binding headers, drivers and enable infrastructure for the

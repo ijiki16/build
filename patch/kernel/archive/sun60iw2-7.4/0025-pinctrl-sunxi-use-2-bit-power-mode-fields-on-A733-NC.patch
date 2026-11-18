@@ -1,7 +1,7 @@
 From 484d4dcdb722cf8dcb5adabfa10af4ebc3708001 Mon Sep 17 00:00:00 2001
 From: Iuri Jikidze <37273763+ijiki16@users.noreply.github.com>
 Date: Tue, 17 Nov 2026 22:14:58 +0000
-Subject: [PATCH 25/28] pinctrl: sunxi: use 2-bit power mode fields on A733
+Subject: [PATCH 25/35] pinctrl: sunxi: use 2-bit power mode fields on A733
  (NCAT3)
 
 On the A733, GPIO_POW_MOD_SEL (PIO + 0x40) holds a 2-bit field per

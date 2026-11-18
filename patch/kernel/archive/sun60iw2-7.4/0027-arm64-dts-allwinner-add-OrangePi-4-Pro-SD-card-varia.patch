@@ -1,7 +1,7 @@
 From 224bac41518b5449e061d50c8409566035a49f25 Mon Sep 17 00:00:00 2001
 From: Iuri Jikidze <37273763+ijiki16@users.noreply.github.com>
 Date: Tue, 17 Nov 2026 22:14:59 +0000
-Subject: [PATCH 27/28] arm64: dts: allwinner: add OrangePi 4 Pro SD-card
+Subject: [PATCH 27/35] arm64: dts: allwinner: add OrangePi 4 Pro SD-card
  variant
 
 The OrangePi 4 Pro dts targets an NVMe rootfs and leaves the SD slot

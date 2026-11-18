@@ -1,7 +1,7 @@
 From 47aa9c1ec77498b66e49a2b957f338b74a0f97b1 Mon Sep 17 00:00:00 2001
 From: rebase <rebase@localhost>
 Date: Tue, 17 Nov 2026 15:29:22 +0000
-Subject: [PATCH 02/28] pinctrl: sunxi: Add support for the Allwinner A733
+Subject: [PATCH 02/35] pinctrl: sunxi: Add support for the Allwinner A733
  R-PIO
 
 The A733 uses a bank layout with 0x80 byte bank stride starting at

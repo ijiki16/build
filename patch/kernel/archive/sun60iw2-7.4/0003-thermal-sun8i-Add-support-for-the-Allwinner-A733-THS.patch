@@ -1,7 +1,7 @@
 From 0ca0169d4e8c8dc59b9d29dbc62cd7be4f40a487 Mon Sep 17 00:00:00 2001
 From: tumredsun <tumredsun@localhost>
 Date: Tue, 20 Oct 2026 15:51:57 +0000
-Subject: [PATCH 03/28] thermal: sun8i: Add support for the Allwinner A733 THS
+Subject: [PATCH 03/35] thermal: sun8i: Add support for the Allwinner A733 THS
 
 The A733 THS is H616-family compatible: five sensors, bus clock and
 reset, 24 MHz module clock, same register set and programming.

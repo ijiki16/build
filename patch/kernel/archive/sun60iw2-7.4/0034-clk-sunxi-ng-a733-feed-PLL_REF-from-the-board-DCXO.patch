@@ -1,0 +1,93 @@
+From e61903abaf35d9a252d0be98a20cac143725fdd6 Mon Sep 17 00:00:00 2001
+From: Iuri Jikidze <37273763+ijiki16@users.noreply.github.com>
+Date: Tue, 17 Nov 2026 23:51:21 +0000
+Subject: [PATCH 34/35] clk: sunxi-ng: a733: feed PLL_REF from the board DCXO
+
+PLL_REF runs from the main crystal (DCXO). On the A733 the DCXO can
+be 19.2, 24 or 26 MHz, and boot0 programs PLL_REF to output 24 MHz.
+The CCU modelled the input as the 24 MHz "osc24M". On the 26 MHz
+OrangePi 4 Pro that made Linux report PLL_REF as 22.15 MHz
+(24 x 24/26), and every PLL-derived rate was 12/13 of the real one.
+Rates that Linux sets came out 13/12 too fast; a "50 MHz" SD clock
+ran at about 54 MHz.
+
+The "osc24M" mod clock source is SYS_CLK24M, which is 24 MHz on all
+boards (A733 User Manual V0.92, SMHC0_CLK_REG source 000). So keep
+"osc24M" for those and give PLL_REF its own "dcxo" input.
+
+Add a "dcxo" fixed clock to the dtsi (default 24 MHz), feed PLL_REF
+and the RTC "hosc" input from it, and set 26 MHz on the OrangePi 4
+Pro. On that board the RTC DCXO_CTRL frequency select (bits 15:14 at
+0x07090160) reads 2, which is the 26 MHz setting.
+
+Made with the help of an AI coding assistant (Claude).
+
+Fixes: fb3227170804 ("clk: sunxi-ng: Add support for Allwinner A733 clock control unit")
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../boot/dts/allwinner/sun60i-a733-orangepi-4-pro.dts  |  5 +++++
+ arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi         | 10 +++++++++-
+ drivers/clk/sunxi-ng/ccu-sun60i-a733.c                 |  6 +++++-
+ 3 files changed, 19 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-4-pro.dts b/arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-4-pro.dts
+index 15ab381c0..7cea2c72e 100644
+--- a/arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-4-pro.dts
++++ b/arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-4-pro.dts
+@@ -87,6 +87,11 @@ reg_serdes1v8: regulator-serdes-1v8 {
+ 	};
+ };
+ 
++/* 26 MHz crystal: RTC DCXO_CTRL frequency select reads 2. */
++&dcxo {
++	clock-frequency = <26000000>;
++};
++
+ &uart0 {
+ 	status = "okay";
+ };
+diff --git a/arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi b/arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi
+index c0469535e..788de87df 100644
+--- a/arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi
++++ b/arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi
+@@ -95,6 +95,14 @@ osc24M: clk-osc24M {
+ 		clock-output-names = "osc24M";
+ 	};
+ 
++	/* Main crystal (DCXO): 19.2, 24 or 26 MHz. Boards set the frequency. */
++	dcxo: clk-dcxo {
++		#clock-cells = <0>;
++		compatible = "fixed-clock";
++		clock-frequency = <24000000>;
++		clock-output-names = "dcxo";
++	};
++
+ 	sys24M: clk-sys24M {
+ 		#clock-cells = <0>;
+ 		compatible = "fixed-clock";
+@@ -271,7 +279,7 @@ rtc: rtc@7090000 {
+ 			reg = <0x7090000 0x400>;
+ 			interrupts = <GIC_SPI 157 IRQ_TYPE_LEVEL_HIGH>;
+ 			clocks = <&r_ccu CLK_RTC>,
+-				 <&osc24M>,
++				 <&dcxo>,
+ 				 <&r_ccu CLK_R_AHB>;
+ 			clock-names = "bus", "hosc", "ahb";
+ 			#clock-cells = <1>;
+diff --git a/drivers/clk/sunxi-ng/ccu-sun60i-a733.c b/drivers/clk/sunxi-ng/ccu-sun60i-a733.c
+index 0ebec76f3..2e3464d52 100644
+--- a/drivers/clk/sunxi-ng/ccu-sun60i-a733.c
++++ b/drivers/clk/sunxi-ng/ccu-sun60i-a733.c
+@@ -47,7 +47,11 @@ static struct ccu_nm pll_ref_clk = {
+ 	.max_rate	= 2800000000,
+ 	.common		= {
+ 		.reg		= 0x0000,
+-		.hw.init	= CLK_HW_INIT("pll-ref", "osc24M",
++		/*
++		 * PLL_REF runs from the board DCXO (19.2, 24 or 26 MHz) and outputs
++		 * 24 MHz. The "osc24M" mod clock source is SYS_CLK24M, always 24 MHz.
++		 */
++		.hw.init	= CLK_HW_INIT("pll-ref", "dcxo",
+ 				&ccu_nm_ops,
+ 				CLK_SET_RATE_UNGATE |
+ 				CLK_IGNORE_UNUSED),

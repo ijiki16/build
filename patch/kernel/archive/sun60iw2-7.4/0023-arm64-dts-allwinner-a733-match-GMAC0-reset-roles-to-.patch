@@ -1,7 +1,7 @@
 From 9f80b4db79677cb97c288b96349768ad1d5f95bb Mon Sep 17 00:00:00 2001
 From: Iuri Jikidze <37273763+ijiki16@users.noreply.github.com>
 Date: Tue, 17 Nov 2026 22:14:58 +0000
-Subject: [PATCH 23/28] arm64: dts: allwinner: a733: match GMAC0 reset roles to
+Subject: [PATCH 23/35] arm64: dts: allwinner: a733: match GMAC0 reset roles to
  the vendor BSP
 
 stmmac pulses its "stmmaceth" reset (assert + deassert) during probe and

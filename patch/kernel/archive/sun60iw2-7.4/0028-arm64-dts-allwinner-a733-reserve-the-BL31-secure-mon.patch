@@ -1,7 +1,7 @@
 From aa5421175f4f23046d780294bc1c35558d0a94f0 Mon Sep 17 00:00:00 2001
 From: Iuri Jikidze <37273763+ijiki16@users.noreply.github.com>
 Date: Tue, 17 Nov 2026 23:38:51 +0000
-Subject: [PATCH 28/28] arm64: dts: allwinner: a733: reserve the BL31 secure
+Subject: [PATCH 28/35] arm64: dts: allwinner: a733: reserve the BL31 secure
  monitor
 
 The vendor boot0/boot_package loads BL31 at 0x48000000 and the vendor

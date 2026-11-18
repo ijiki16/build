@@ -1,7 +1,7 @@
 From b14cbb33a230aab3c1de32812e6db28dc2fd88fe Mon Sep 17 00:00:00 2001
 From: tumredsun <tumredsun@localhost>
 Date: Wed, 21 Oct 2026 06:02:02 +0000
-Subject: [PATCH 12/28] net: stmmac: add Allwinner A733 GMAC-210 glue
+Subject: [PATCH 12/35] net: stmmac: add Allwinner A733 GMAC-210 glue
 
 ---
  drivers/net/ethernet/stmicro/stmmac/Kconfig   |  11 ++

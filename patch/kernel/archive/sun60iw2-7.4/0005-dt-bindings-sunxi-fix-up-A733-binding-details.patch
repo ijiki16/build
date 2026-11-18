@@ -1,7 +1,7 @@
 From 3d37ecc31ec612077facbaa3da9eb23b762a9c46 Mon Sep 17 00:00:00 2001
 From: rebase <rebase@localhost>
 Date: Tue, 17 Nov 2026 15:29:59 +0000
-Subject: [PATCH 05/28] dt-bindings: sunxi: fix up A733 binding details
+Subject: [PATCH 05/35] dt-bindings: sunxi: fix up A733 binding details
 
 - declare clocks/clock-names at the top level of the CCU binding so
   additionalProperties: false works as intended

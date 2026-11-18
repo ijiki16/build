@@ -1,7 +1,7 @@
 From e8a680bc11e88ead27d632b1ed9ef2326124df60 Mon Sep 17 00:00:00 2001
 From: tumredsun <tumredsun@localhost>
 Date: Wed, 21 Oct 2026 13:51:29 +0000
-Subject: [PATCH 14/28] ARM: dts: sunxi: enable SerDes and PCIe on the OrangePi
+Subject: [PATCH 14/35] ARM: dts: sunxi: enable SerDes and PCIe on the OrangePi
  4 Pro
 
 ---

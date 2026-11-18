@@ -1,0 +1,133 @@
+From 2db1ca5ffee85faa3f6fc4e8e123ca50851bea0c Mon Sep 17 00:00:00 2001
+From: Iuri Jikidze <37273763+ijiki16@users.noreply.github.com>
+Date: Tue, 17 Nov 2026 23:52:35 +0000
+Subject: [PATCH 35/35] arm64: dts: allwinner: orangepi-4-pro-sd: use the
+ AXP318W PMIC
+
+Describe the board PMIC (AXP318W at 0x36 on S-TWI0) with the two
+switches that Linux needs:
+
+- SWOUT1 (dc1sw1) powers the YT8531C PHY (VCC-3V3-PHY). boot0 leaves
+  it off. Use it as the GMAC "phy" supply, so the kernel switches the
+  PHY on before the MDIO scan.
+- SWOUT2 (dc1sw2) powers the SD card. Use it as vmmc instead of the
+  fixed placeholder.
+
+Both are always-on. Rails that are not described are never switched
+off by the regulator core. No IRQ line is described, so the MFD
+registers regulators only.
+
+This replaces the userspace i2c-dev workaround that set reg 0x11
+bit 3 and re-probed the GMAC.
+
+Made with the help of an AI coding assistant (Claude).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../sun60i-a733-orangepi-4-pro-sd.dts         | 59 +++++++++++--------
+ 1 file changed, 33 insertions(+), 26 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-4-pro-sd.dts b/arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-4-pro-sd.dts
+index 1befd180f..b5329e795 100644
+--- a/arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-4-pro-sd.dts
++++ b/arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-4-pro-sd.dts
+@@ -6,16 +6,15 @@
+  *  - the SD slot (mmc0) re-enabled, muxed as PF0..PF5 like the vendor BSP;
+  *    uart0 no longer claims PF2/PF4 (they are SD lines; boot0 already muxed
+  *    the debug console);
+- *  - 3.3 V signalling only: no UHS (mainline has no driver for the board's
+- *    AXP PMIC to switch vqmmc to 1.8 V; vmmc dc1sw2 is left on by boot0);
++ *  - 3.3 V signalling only: no UHS (the switchable SD I/O rail, vqmmc, is
++ *    not described yet); vmmc is PMIC SWOUT2;
+  *  - the GPU disabled (powervr.ko hangs the board on probe);
+- *  - working GMAC0 + YT8531C settings, and the PMIC's S-TWI0 bus exposed
+- *    through i2c-dev only, so userspace can switch on the PHY supply
+- *    (dc1sw1), which nothing else enables;
++ *  - working GMAC0 + YT8531C settings, with the PHY supply (PMIC SWOUT1,
++ *    which boot0 leaves off) enabled by the AXP318W driver;
+  *  - root= pointing at the SD image's first partition.
+  *
+  * Tested on an OrangePi 4 Pro: boots Debian 13 from SD; Ethernet links at
+- * 100 Mb/s (switch limit), DHCP, ping and SSH work once dc1sw1 is on.
++ * 100 Mb/s (switch limit), DHCP, ping and SSH work.
+  */
+ 
+ #include "sun60i-a733-orangepi-4-pro.dts"
+@@ -28,27 +27,9 @@ chosen {
+ 		 */
+ 		bootargs = "root=PARTUUID=e86ba129-01 rootwait rootfstype=ext4 earlycon=uart8250,mmio32,0x02500000 console=ttyS0,115200n8 console=tty1 consoleblank=0 loglevel=7 printk.time=1 clk_ignore_unused swiotlb=65536 cma=512M panic=10";
+ 	};
+-
+-	/*
+-	 * SD card power is AXP8191 dc1sw2, switched on by boot0. Mainline has
+-	 * no AXP8191 driver, so describe it as a fixed always-on 3.3 V rail;
+-	 * without a vmmc supply the MMC core has ocr_avail = 0 and rejects
+-	 * every card ("no support for card's volts").
+-	 */
+-	reg_sd3v3: regulator-sd-3v3 {
+-		compatible = "regulator-fixed";
+-		regulator-name = "sd-3v3";
+-		regulator-min-microvolt = <3300000>;
+-		regulator-max-microvolt = <3300000>;
+-		regulator-always-on;
+-	};
+ };
+ 
+-/*
+- * PMIC bus (S-TWI0 on PL0/PL1, function 2; AXP318 at 0x36). No PMIC driver
+- * is bound: the bus is exposed through i2c-dev only, to inspect the rails
+- * (e.g. dc1sw1 = VCC-3V3-PHY) from userspace.
+- */
++/* PMIC bus: S-TWI0 on PL0/PL1 (function 2), AXP318W at 0x36. */
+ &r_pio {
+ 	r_i2c0_pins: r-i2c0-pins {
+ 		pins = "PL0", "PL1";
+@@ -73,6 +54,31 @@ r_i2c0: i2c@7083000 {
+ 		#address-cells = <1>;
+ 		#size-cells = <0>;
+ 		status = "okay";
++
++		/*
++		 * Schematic OPi 4 Pro v1.3.2 p.5 ("AXP318"; the vendor BSP calls it
++		 * AXP8191). Only the two switches Linux needs are described; rails
++		 * left out are never switched off by the regulator core. No IRQ
++		 * line is described, so the MFD registers regulators only.
++		 */
++		pmic@36 {
++			compatible = "x-powers,axp318w";
++			reg = <0x36>;
++
++			regulators {
++				/* SWOUT1 ("dc1sw1"): VCC-3V3-PHY. boot0 leaves it off. */
++				reg_swout1: swout1 {
++					regulator-name = "vcc-3v3-phy";
++					regulator-always-on;
++				};
++
++				/* SWOUT2 ("dc1sw2"): SD card and GMAC I/O, on from boot0. */
++				reg_swout2: swout2 {
++					regulator-name = "vcc-3v3-sd";
++					regulator-always-on;
++				};
++			};
++		};
+ 	};
+ };
+ 
+@@ -113,6 +119,7 @@ &gpu {
+  * clk_csr = 4: 200 MHz / 102 = ~2 MHz.
+  */
+ &gmac0 {
++	phy-supply = <&reg_swout1>;
+ 	snps,clk-csr = <4>;
+ 	/* without it stmmac finds no PHY at open, though YT8531 binds */
+ 	phy-handle = <&gmac0_phy0>;
+@@ -164,7 +171,7 @@ &mmc0 {
+ 	 * instead: the rootfs card never leaves the slot.
+ 	 */
+ 	broken-cd;
+-	vmmc-supply = <&reg_sd3v3>;
++	vmmc-supply = <&reg_swout2>;
+ 	bus-width = <4>;
+ 	max-frequency = <50000000>;
+ 	cap-sd-highspeed;

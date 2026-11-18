@@ -1,7 +1,7 @@
 From 4edc2bcef353d8ca7740f602e98ff6b4617430c6 Mon Sep 17 00:00:00 2001
 From: tumredsun <tumredsun@localhost>
 Date: Wed, 21 Oct 2026 05:32:35 +0000
-Subject: [PATCH 09/28] PCI: dwc: add Allwinner A733 PCIe host driver
+Subject: [PATCH 09/35] PCI: dwc: add Allwinner A733 PCIe host driver
 
 ---
  drivers/pci/controller/dwc/Kconfig            |  13 +

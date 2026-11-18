@@ -1,7 +1,7 @@
 From 0f334f298667dcaf14a8fff36ddc2b6f362cec82 Mon Sep 17 00:00:00 2001
 From: tumredsun <tumredsun@localhost>
 Date: Tue, 20 Oct 2026 19:31:28 +0000
-Subject: [PATCH 04/28] ARM: dts: sunxi: Add Allwinner A733 device tree
+Subject: [PATCH 04/35] ARM: dts: sunxi: Add Allwinner A733 device tree
 
 Add the sun60i-a733.dtsi describing the clock controllers (CCU,
 CPUPLL and the RTC's clock side), the PIO and R-PIO controllers,

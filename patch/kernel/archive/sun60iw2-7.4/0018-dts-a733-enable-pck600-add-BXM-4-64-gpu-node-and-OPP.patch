@@ -1,7 +1,7 @@
 From 9a798e5fa4c2db9a594ca619000b8a84f99d9cc3 Mon Sep 17 00:00:00 2001
 From: tumredsun <tumredsun@localhost>
 Date: Fri, 6 Nov 2026 16:24:01 +0000
-Subject: [PATCH 18/28] dts/a733: enable pck600, add BXM-4-64 gpu node and OPP
+Subject: [PATCH 18/35] dts/a733: enable pck600, add BXM-4-64 gpu node and OPP
  table
 
 ---

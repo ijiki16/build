@@ -1,7 +1,7 @@
 From 3e1d9f24e14f12f78dd32b47fdff555390e049be Mon Sep 17 00:00:00 2001
 From: Iuri Jikidze <37273763+ijiki16@users.noreply.github.com>
 Date: Tue, 17 Nov 2026 15:49:47 +0000
-Subject: [PATCH 22/28] PCI: dwc: sun60i-a733: follow upstream DWC port-logic
+Subject: [PATCH 22/35] PCI: dwc: sun60i-a733: follow upstream DWC port-logic
  macro renames
 
 Mainline renamed the DesignWare port-logic register macros after

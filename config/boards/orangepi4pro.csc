@@ -9,7 +9,7 @@ KERNEL_TEST_TARGET="vendor"
 IMAGE_PARTITION_TABLE="msdos"
 
 BOOT_FDT_FILE="allwinner/sun60i-a733-orangepi-4-pro.dtb"
-# edge: mainline 7.4 port. SD/NVMe/Ethernet/serial work; no HDMI, WiFi/BT or GPU.
+# edge: mainline 7.4 port. SD/NVMe/Ethernet/serial/PMIC work; no HDMI, WiFi/BT or GPU.
 [[ "${BRANCH}" == "edge" ]] && BOOT_FDT_FILE="allwinner/sun60i-a733-orangepi-4-pro-armbian.dtb"
 SUNXI_BOOT0_SDCARD_FEX="${SRC}/packages/blobs/sunxi/sun60iw2/boot0_sdcard_orangepi4pro.fex"
 SUNXI_BOOT0_SPINOR_FEX="${SRC}/packages/blobs/sunxi/sun60iw2/boot0_spinor_orangepi4pro.fex"
