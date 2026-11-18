@@ -1,0 +1,74 @@
+From 4f003431046e4f3a853df5edb3eebb5d19d47ce3 Mon Sep 17 00:00:00 2001
+From: Iuri Jikidze <37273763+ijiki16@users.noreply.github.com>
+Date: Wed, 18 Nov 2026 17:15:18 +0000
+Subject: [PATCH 40/42] net: phy: motorcomm: restore the YT8531 clock output
+ after a reset
+
+The clock output is only configured at probe. Closing the interface
+asserts the PHY reset, so the register returns to its 25 MHz default on
+the next open. Boards that feed the MAC TX clock from this output then
+stop transmitting after a link down and up.
+
+Apply the setting from config_init as well.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/net/phy/motorcomm.c | 26 +++++++++++++++++++-------
+ 1 file changed, 19 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/net/phy/motorcomm.c b/drivers/net/phy/motorcomm.c
+index a87e83fdf..3708ca5cf 100644
+--- a/drivers/net/phy/motorcomm.c
++++ b/drivers/net/phy/motorcomm.c
+@@ -1205,18 +1205,12 @@ static int yt8521_probe(struct phy_device *phydev)
+ 					  val);
+ }
+ 
+-static int yt8531_probe(struct phy_device *phydev)
++static int yt8531_clk_out_config(struct phy_device *phydev)
+ {
+ 	struct device *dev = &phydev->mdio.dev;
+-	struct clk *clk;
+ 	u16 mask, val;
+ 	u32 freq;
+ 
+-	clk = devm_clk_get_optional_enabled(dev, NULL);
+-	if (IS_ERR(clk))
+-		return dev_err_probe(dev, PTR_ERR(clk),
+-				     "failed to get and enable PHY clock\n");
+-
+ 	if (device_property_read_u32(dev, "motorcomm,clk-out-frequency-hz", &freq))
+ 		freq = YTPHY_DTS_OUTPUT_CLK_DIS;
+ 
+@@ -1248,6 +1242,19 @@ static int yt8531_probe(struct phy_device *phydev)
+ 					  val);
+ }
+ 
++static int yt8531_probe(struct phy_device *phydev)
++{
++	struct device *dev = &phydev->mdio.dev;
++	struct clk *clk;
++
++	clk = devm_clk_get_optional_enabled(dev, NULL);
++	if (IS_ERR(clk))
++		return dev_err_probe(dev, PTR_ERR(clk),
++				     "failed to get and enable PHY clock\n");
++
++	return yt8531_clk_out_config(phydev);
++}
++
+ /**
+  * ytphy_utp_read_lpa() - read LPA then setup lp_advertising for utp
+  * @phydev: a pointer to a &struct phy_device
+@@ -1880,6 +1887,11 @@ static int yt8531_config_init(struct phy_device *phydev)
+ 	struct device *dev = &phydev->mdio.dev;
+ 	int ret;
+ 
++	/* A PHY reset, as on interface close, restores the default clock output. */
++	ret = yt8531_clk_out_config(phydev);
++	if (ret < 0)
++		return ret;
++
+ 	ret = ytphy_rgmii_clk_delay_config_with_lock(phydev);
+ 	if (ret < 0)
+ 		return ret;

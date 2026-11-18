@@ -1,7 +1,7 @@
 From 2cdb5a290568d643e0b92db124e0df554365ce9f Mon Sep 17 00:00:00 2001
 From: Iuri Jikidze <37273763+ijiki16@users.noreply.github.com>
 Date: Wed, 18 Nov 2026 13:17:30 +0000
-Subject: [PATCH 37/39] arm64: dts: allwinner: a733: add the PCIe power domain
+Subject: [PATCH 37/42] arm64: dts: allwinner: a733: add the PCIe power domain
 
 The PCIe controller has no power-domains property, so genpd treats
 PD_PCIE as unused. When the last known consumer of the PCK-600 binds,

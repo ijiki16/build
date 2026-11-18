@@ -1,0 +1,22 @@
+[Unit]
+Description=AIC8800 Bluetooth on ttyS1
+# wlan0 appears after the driver has loaded the Bluetooth firmware.
+After=sys-subsystem-net-devices-wlan0.device systemd-modules-load.service
+BindsTo=sys-subsystem-net-devices-wlan0.device
+Before=bluetooth.service
+Wants=bluetooth.service
+ConditionPathExists=/dev/ttyS1
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+TimeoutStartSec=120
+# Releases BT_RST_N (PM2) through rfkill-gpio.
+ExecStartPre=/usr/sbin/rfkill unblock bluetooth
+ExecStartPre=/bin/sleep 1
+# aic8800_btlpm asserts BT_WAKE (PM3) and watches BT_HOST_WAKE (PM4).
+ExecStartPre=/bin/sh -c 'echo 1 > /proc/bluetooth/sleep/lpm'
+ExecStart=/usr/sbin/aic8800-bt-start
+
+[Install]
+WantedBy=multi-user.target
