@@ -1,7 +1,7 @@
 From 46557c684537789f1baf4dce14f7b67d2087fe72 Mon Sep 17 00:00:00 2001
 From: tumredsun <tumredsun@localhost>
 Date: Wed, 21 Oct 2026 06:02:02 +0000
-Subject: [PATCH 11/35] dt-bindings: net: add Allwinner A733 GMAC-210
+Subject: [PATCH 11/39] dt-bindings: net: add Allwinner A733 GMAC-210
 
 ---
  .../net/allwinner,sun60i-a733-gmac.yaml       | 140 ++++++++++++++++++

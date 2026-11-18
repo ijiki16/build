@@ -1,7 +1,7 @@
 From 2d7dfa2f24a6af35dc1f165d734a49565a84664f Mon Sep 17 00:00:00 2001
 From: tumredsun <tumredsun@localhost>
 Date: Wed, 21 Oct 2026 06:02:03 +0000
-Subject: [PATCH 13/35] ARM: dts: sunxi: enable GMAC-210 on the A733
+Subject: [PATCH 13/39] ARM: dts: sunxi: enable GMAC-210 on the A733
 
 ---
  .../allwinner/sun60i-a733-orangepi-4-pro.dts  | 29 +++++++++++++

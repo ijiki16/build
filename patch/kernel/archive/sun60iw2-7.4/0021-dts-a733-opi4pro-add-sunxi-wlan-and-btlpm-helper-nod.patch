@@ -1,7 +1,7 @@
 From 620445d940aa0e94e3367733c92a8ad6190ab3bf Mon Sep 17 00:00:00 2001
 From: TumRedSun <TumRedSun@users.noreply.github.com>
 Date: Tue, 17 Nov 2026 12:17:08 +0000
-Subject: [PATCH 21/35] dts/a733-opi4pro: add sunxi-wlan and btlpm helper nodes
+Subject: [PATCH 21/39] dts/a733-opi4pro: add sunxi-wlan and btlpm helper nodes
 
 - sunxi-wlan: wlan_power (bldo5+cldo1), regon PM1, hostwake PM0, bus 1
   (mmc1); consumed by the out-of-tree sunxi-wlan helper module for the

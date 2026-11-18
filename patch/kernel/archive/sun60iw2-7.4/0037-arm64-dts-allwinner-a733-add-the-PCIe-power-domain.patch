@@ -1,0 +1,34 @@
+From 2cdb5a290568d643e0b92db124e0df554365ce9f Mon Sep 17 00:00:00 2001
+From: Iuri Jikidze <37273763+ijiki16@users.noreply.github.com>
+Date: Wed, 18 Nov 2026 13:17:30 +0000
+Subject: [PATCH 37/39] arm64: dts: allwinner: a733: add the PCIe power domain
+
+The PCIe controller has no power-domains property, so genpd treats
+PD_PCIE as unused. When the last known consumer of the PCK-600 binds,
+sync_state powers the domain off under the running NVMe drive and all
+CPUs stall. This appeared when the display driver was loaded.
+
+The vendor device tree links pcie@6000000 to this domain. Do the same.
+
+Tested on an OrangePi 4 Pro: the display driver loads, and NVMe stays
+available.
+
+Made with the help of an AI coding assistant (Claude).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi b/arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi
+index 164f158db..e7fb44fce 100644
+--- a/arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi
++++ b/arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi
+@@ -526,6 +526,7 @@ pcie: pcie@6000000 {
+ 
+ 			#interrupt-cells = <1>;
+ 
++			power-domains = <&pck600 PD_PCIE>;
+ 			status = "disabled";
+ 
+ 			pcie_intc: legacy-interrupt-controller {

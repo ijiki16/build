@@ -1,7 +1,7 @@
 From ef392a3cec961cf378ac0b9695b9aaec9f26490c Mon Sep 17 00:00:00 2001
 From: Andre Przywara <andre.przywara@arm.com>
 Date: Thu, 10 Sep 2026 11:31:12 +0200
-Subject: [PATCH 33/35] regulator: axp20x: add support for the AXP318W
+Subject: [PATCH 33/39] regulator: axp20x: add support for the AXP318W
 
 The X-Powers AXP318W is a typical PMIC from X-Powers, featuring nine
 DC/DC converters and 28 LDOs, on the regulator side.

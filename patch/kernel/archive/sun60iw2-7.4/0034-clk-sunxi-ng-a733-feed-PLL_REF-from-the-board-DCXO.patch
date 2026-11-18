@@ -1,7 +1,7 @@
 From f2b3815f7e16ee10bbdbf95f3970176dedcd0764 Mon Sep 17 00:00:00 2001
 From: Iuri Jikidze <37273763+ijiki16@users.noreply.github.com>
 Date: Tue, 17 Nov 2026 23:51:21 +0000
-Subject: [PATCH 34/35] clk: sunxi-ng: a733: feed PLL_REF from the board DCXO
+Subject: [PATCH 34/39] clk: sunxi-ng: a733: feed PLL_REF from the board DCXO
 
 PLL_REF runs from the main crystal (DCXO). On the A733 the DCXO can
 be 19.2, 24 or 26 MHz, and boot0 programs PLL_REF to output 24 MHz.

@@ -1,7 +1,7 @@
 From 288e44cfd2bcef6933c690435c61f8cd5e4b2b4d Mon Sep 17 00:00:00 2001
 From: tumredsun <tumredsun@localhost>
 Date: Fri, 6 Nov 2026 16:43:03 +0000
-Subject: [PATCH 19/35] dts/a733-opi4pro: console=ttyS0 first - userspace kept
+Subject: [PATCH 19/39] dts/a733-opi4pro: console=ttyS0 first - userspace kept
  the UART dark with tty1-only
 
 ---

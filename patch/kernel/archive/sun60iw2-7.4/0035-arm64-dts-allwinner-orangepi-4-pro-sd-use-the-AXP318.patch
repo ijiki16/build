@@ -1,7 +1,7 @@
 From d98cfeec4c7625a8b54f713adcceaff099049dbc Mon Sep 17 00:00:00 2001
 From: Iuri Jikidze <37273763+ijiki16@users.noreply.github.com>
 Date: Tue, 17 Nov 2026 23:52:35 +0000
-Subject: [PATCH 35/35] arm64: dts: allwinner: orangepi-4-pro-sd: use the
+Subject: [PATCH 35/39] arm64: dts: allwinner: orangepi-4-pro-sd: use the
  AXP318W PMIC
 
 Describe the board PMIC (AXP318W at 0x36 on S-TWI0) with the two

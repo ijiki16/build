@@ -1,7 +1,7 @@
 From 1ce51ec99a38d665fea3246620294049aabc6350 Mon Sep 17 00:00:00 2001
 From: tumredsun <tumredsun@localhost>
 Date: Thu, 22 Oct 2026 11:05:27 +0000
-Subject: [PATCH 16/35] arm64/a733 bringup: keep x0 (SCTLR) in
+Subject: [PATCH 16/39] arm64/a733 bringup: keep x0 (SCTLR) in
  __primary_switch; uart_putc uses scratch regs
 
 The extra dcache_clean_poc calls added in 7b47969ae clobbered x0

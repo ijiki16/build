@@ -13,6 +13,9 @@ setenv load_addr "0x4d000000"
 # U-Boot otherwise moves the initrd below 0x4a000000, over BL31, and the board hangs.
 setenv fdt_high "0xffffffff"
 setenv initrd_high "0xffffffff"
+# With a monitor attached, U-Boot edits the FDT for its vendor display driver. The mainline DT has no
+# /soc/sunxi-drm node, so that edit corrupts the FDT and the kernel panics. drm_debug skips the edit.
+setenv drm_debug "1"
 
 # default values
 setenv verbosity "1"

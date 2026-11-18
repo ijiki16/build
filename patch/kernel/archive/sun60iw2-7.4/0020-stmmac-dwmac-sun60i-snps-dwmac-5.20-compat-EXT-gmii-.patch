@@ -1,7 +1,7 @@
 From 5b6b6ef36ff23ca3d4cc0ed28aac14ea6f0b269c Mon Sep 17 00:00:00 2001
 From: tumredsun <tumredsun@localhost>
 Date: Sat, 7 Nov 2026 12:13:59 +0000
-Subject: [PATCH 20/35] stmmac/dwmac-sun60i: snps,dwmac-5.20 compat + EXT gmii
+Subject: [PATCH 20/39] stmmac/dwmac-sun60i: snps,dwmac-5.20 compat + EXT gmii
  clock + PHY reset - MDIO was reading wrong core type (DWMAC100 vs real GMAC4,
  Synopsys 0x53) dts/opi4pro: drop init=/bin/sh, restore normal sysvinit/OpenRC
  boot

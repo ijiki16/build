@@ -1,7 +1,7 @@
 From 0b5b702822a7045a1478a631a074c427666e8818 Mon Sep 17 00:00:00 2001
 From: tumredsun <tumredsun@localhost>
 Date: Wed, 21 Oct 2026 05:32:35 +0000
-Subject: [PATCH 08/35] phy: sun60i-serdes: add Allwinner A733 combo PCIe PHY
+Subject: [PATCH 08/39] phy: sun60i-serdes: add Allwinner A733 combo PCIe PHY
  driver
 
 ---

@@ -1,7 +1,7 @@
 From 7265f01b197bd61497c9fc830de0e4cd62643113 Mon Sep 17 00:00:00 2001
 From: tumredsun <tumredsun@localhost>
 Date: Wed, 21 Oct 2026 05:32:36 +0000
-Subject: [PATCH 10/35] ARM: dts: sunxi: enable SerDes combo PHY and PCIe host
+Subject: [PATCH 10/39] ARM: dts: sunxi: enable SerDes combo PHY and PCIe host
  on A733
 
 ---

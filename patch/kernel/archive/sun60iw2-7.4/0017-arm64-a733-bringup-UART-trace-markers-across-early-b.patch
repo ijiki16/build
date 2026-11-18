@@ -1,7 +1,7 @@
 From 4bf2d8dc8f819c1c876884a9abac88e2a214b22c Mon Sep 17 00:00:00 2001
 From: tumredsun <tumredsun@localhost>
 Date: Thu, 22 Oct 2026 13:12:58 +0000
-Subject: [PATCH 17/35] arm64/a733 bringup: UART trace markers across early
+Subject: [PATCH 17/39] arm64/a733 bringup: UART trace markers across early
  boot
 
 Add temporary debug tracing for the A733 bring-up:

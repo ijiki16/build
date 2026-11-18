@@ -1,7 +1,7 @@
 From cde97ecda32b4782f3bb4d1dc08c836be03eb03f Mon Sep 17 00:00:00 2001
 From: Iuri Jikidze <37273763+ijiki16@users.noreply.github.com>
 Date: Tue, 17 Nov 2026 22:14:59 +0000
-Subject: [PATCH 26/35] clk: a733 bringup: print clock gate traces with
+Subject: [PATCH 26/39] clk: a733 bringup: print clock gate traces with
  pr_debug
 
 The bringup trace hook clk_pcie_watch() printed every clock

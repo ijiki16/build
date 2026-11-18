@@ -1,0 +1,34 @@
+From 026c5669bf8cf8d6c086b3d9556daf1384c8fdc0 Mon Sep 17 00:00:00 2001
+From: Iuri Jikidze <37273763+ijiki16@users.noreply.github.com>
+Date: Wed, 18 Nov 2026 13:17:30 +0000
+Subject: [PATCH 38/39] arm64: dts: allwinner: a733: set the TCON-TV endpoint
+ index
+
+The display driver takes the TCON index from the DE output endpoint.
+Without a reg property the index is 0, the driver selects a TCON top
+block that does not exist, and it dereferences a NULL pointer in
+tcon_top_hdmi_set_gate(). The vendor device tree uses index 4.
+
+Tested on an OrangePi 4 Pro: the display driver binds without the oops.
+
+Made with the help of an AI coding assistant (Claude).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi b/arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi
+index e7fb44fce..8655bbfbf 100644
+--- a/arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi
++++ b/arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi
+@@ -574,7 +574,8 @@ disp0: port@0 {
+ 					reg = <0>;
+ 					#address-cells = <1>;
+ 					#size-cells = <0>;
+-					disp0_out_tcon3: endpoint {
++					disp0_out_tcon3: endpoint@4 {
++						reg = <4>; /* TCON index read by the driver, as in the vendor DT */
+ 						remote-endpoint = <&tcon3_in_disp0>;
+ 					};
+ 				};
