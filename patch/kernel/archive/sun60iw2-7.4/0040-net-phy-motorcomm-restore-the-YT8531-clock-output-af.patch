@@ -1,7 +1,7 @@
 From 4f003431046e4f3a853df5edb3eebb5d19d47ce3 Mon Sep 17 00:00:00 2001
 From: Iuri Jikidze <37273763+ijiki16@users.noreply.github.com>
 Date: Wed, 18 Nov 2026 17:15:18 +0000
-Subject: [PATCH 40/42] net: phy: motorcomm: restore the YT8531 clock output
+Subject: [PATCH 40/46] net: phy: motorcomm: restore the YT8531 clock output
  after a reset
 
 The clock output is only configured at probe. Closing the interface

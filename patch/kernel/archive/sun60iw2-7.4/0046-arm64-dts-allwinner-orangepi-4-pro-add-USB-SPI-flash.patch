@@ -1,0 +1,220 @@
+From 12df4f3f300c0dd2470bce5bf8e937d4cad92f09 Mon Sep 17 00:00:00 2001
+From: Iuri Jikidze <37273763+ijiki16@users.noreply.github.com>
+Date: Thu, 19 Nov 2026 03:58:06 +0000
+Subject: [PATCH 46/46] arm64: dts: allwinner: orangepi-4-pro: add USB, SPI
+ flash and ADC
+
+Add the two EHCI/OHCI pairs and the DWC3 controller (USB 2.0 speed, the
+combo PHY is not supported yet), their VBUS supplies, the SPI-NOR flash
+and the GPADC.
+
+The flash partition is read-only: without DMA the SPI controller still
+drops bytes on some reads, even at 20 MHz.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../sun60i-a733-orangepi-4-pro-sd.dts         | 177 ++++++++++++++++++
+ 1 file changed, 177 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-4-pro-sd.dts b/arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-4-pro-sd.dts
+index b9340961a..6f7b14ca6 100644
+--- a/arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-4-pro-sd.dts
++++ b/arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-4-pro-sd.dts
+@@ -35,6 +35,25 @@ rfkill-bt {
+ 		shutdown-gpios = <&r_pio 1 2 GPIO_ACTIVE_HIGH>;
+ 	};
+ 
++	reg_usb0_vbus: regulator-usb0-vbus {
++		compatible = "regulator-fixed";
++		regulator-name = "usb0-vbus";
++		regulator-min-microvolt = <5000000>;
++		regulator-max-microvolt = <5000000>;
++		gpio = <&pio 1 8 GPIO_ACTIVE_HIGH>; /* PB8 */
++		enable-active-high;
++		regulator-always-on;
++	};
++
++	reg_usb1_vbus: regulator-usb1-vbus {
++		compatible = "regulator-fixed";
++		regulator-name = "usb1-vbus";
++		regulator-min-microvolt = <5000000>;
++		regulator-max-microvolt = <5000000>;
++		gpio = <&pio 1 7 GPIO_ACTIVE_LOW>; /* PB7 */
++		regulator-always-on;
++	};
++
+ 	/* AIC8800D80 power: the SDIO host switches it through WL_REG_ON. */
+ 	reg_wifi: regulator-wifi {
+ 		compatible = "regulator-fixed";
+@@ -64,6 +83,157 @@ r_i2c0_pins: r-i2c0-pins {
+ };
+ 
+ &{/soc} {
++	usbphy: phy@4100400 {
++		compatible = "allwinner,sun60i-a733-usb-phy",
++			     "allwinner,sun20i-d1-usb-phy";
++		reg = <0x4100400 0x14>, <0x4101800 0x4>, <0x4200800 0x4>;
++		reg-names = "phy_ctrl", "pmu0", "pmu1";
++		clocks = <&ccu CLK_USB>, <&ccu CLK_USB1>;
++		clock-names = "usb0_phy", "usb1_phy";
++		resets = <&ccu RST_USB_0_PHY_RSTN>, <&ccu RST_USB_1_PHY_RSTN>;
++		reset-names = "usb0_reset", "usb1_reset";
++		usb1_vbus-supply = <&reg_usb0_vbus>;
++		#phy-cells = <1>;
++	};
++
++	/* The OTG port, in host mode. */
++	ehci0: usb@4101000 {
++		compatible = "allwinner,sun60i-a733-ehci", "generic-ehci";
++		reg = <0x4101000 0x100>;
++		interrupts = <GIC_SPI 157 IRQ_TYPE_LEVEL_HIGH>;
++		clocks = <&ccu CLK_USB_SYS_AHB_GATE>, <&ccu CLK_MSI_LITE2>,
++			 <&ccu CLK_USB_REF>, <&ccu CLK_USB0_EHCI>;
++		resets = <&ccu RST_USB_0_EHCI>;
++		phys = <&usbphy 0>;
++		phy-names = "usb";
++		dr_mode = "host";
++	};
++
++	ohci0: usb@4101400 {
++		compatible = "allwinner,sun60i-a733-ohci", "generic-ohci";
++		reg = <0x4101400 0x100>;
++		interrupts = <GIC_SPI 158 IRQ_TYPE_LEVEL_HIGH>;
++		clocks = <&ccu CLK_USB_SYS_AHB_GATE>, <&ccu CLK_MSI_LITE2>,
++			 <&ccu CLK_USB_REF>, <&ccu CLK_USB0_OHCI>;
++		resets = <&ccu RST_USB_0_OHCI>;
++		phys = <&usbphy 0>;
++		phy-names = "usb";
++		dr_mode = "host";
++	};
++
++	ehci1: usb@4200000 {
++		compatible = "allwinner,sun60i-a733-ehci", "generic-ehci";
++		reg = <0x4200000 0x100>;
++		interrupts = <GIC_SPI 159 IRQ_TYPE_LEVEL_HIGH>;
++		clocks = <&ccu CLK_USB_SYS_AHB_GATE>, <&ccu CLK_MSI_LITE2>,
++			 <&ccu CLK_USB_REF>, <&ccu CLK_USB1_EHCI>;
++		resets = <&ccu RST_USB_1_EHCI>;
++		phys = <&usbphy 1>;
++		phy-names = "usb";
++	};
++
++	ohci1: usb@4200400 {
++		compatible = "allwinner,sun60i-a733-ohci", "generic-ohci";
++		reg = <0x4200400 0x100>;
++		interrupts = <GIC_SPI 160 IRQ_TYPE_LEVEL_HIGH>;
++		clocks = <&ccu CLK_USB_SYS_AHB_GATE>, <&ccu CLK_MSI_LITE2>,
++			 <&ccu CLK_USB_REF>, <&ccu CLK_USB1_OHCI>;
++		resets = <&ccu RST_USB_1_OHCI>;
++		phys = <&usbphy 1>;
++		phy-names = "usb";
++	};
++
++	u2phy: phy@6b00000 {
++		compatible = "allwinner,sunxi-plat-phy";
++		reg = <0x6b00000 0x800>, <0x6c00000 0x10>;
++		reg-names = "u2_base", "subsys";
++		clocks = <&ccu CLK_USB2_U2_REF>, <&ccu CLK_SERDES_PHY_CFG>,
++			 <&ccu CLK_USB_SYS_AHB_GATE>;
++		clock-names = "phy_clk", "subsys", "ahb";
++		resets = <&ccu RST_BUS_SERDES>;
++		reset-names = "subsys";
++		aw,phy_tune_param = <0x143338d6>;
++		#phy-cells = <0>;
++	};
++
++	/* The USB 3.0 port. It runs at USB 2.0 speed without the combo PHY driver. */
++	dwc3: usb@6a00000 {
++		compatible = "snps,dwc3";
++		reg = <0x6a00000 0x100000>;
++		interrupts = <GIC_SPI 155 IRQ_TYPE_LEVEL_HIGH>;
++		clocks = <&ccu CLK_USB0_DEVICE>, <&ccu CLK_USB2_MF>,
++			 <&ccu CLK_USB2_SUSPEND>, <&ccu CLK_USB2_U3_UTMI>,
++			 <&ccu CLK_USB2_U2_PIPE>;
++		clock-names = "bus_early", "ref", "suspend", "utmi", "pipe";
++		assigned-clocks = <&ccu CLK_USB2_MF>, <&ccu CLK_USB2_U2_PIPE>,
++				  <&ccu CLK_USB2_U3_UTMI>;
++		assigned-clock-parents = <0>, <&ccu CLK_PLL_PERI0_480M>,
++					 <&ccu CLK_PLL_PERI0_300M>;
++		assigned-clock-rates = <24000000>, <120000000>, <60000000>;
++		resets = <&ccu RST_USB_0_DEVICE>, <&ccu RST_USB_2>;
++		power-domains = <&pck600 PD_USB2>;
++		dr_mode = "host";
++		maximum-speed = "high-speed";
++		phy_type = "utmi";
++		phys = <&u2phy>;
++		phy-names = "usb2-phy";
++		snps,dis_enblslpm_quirk;
++		snps,dis-u1-entry-quirk;
++		snps,dis-u2-entry-quirk;
++		snps,dis_u2_susphy_quirk;
++		snps,dis_u3_susphy_quirk;
++	};
++
++	gpadc: adc@2521000 {
++		compatible = "allwinner,sun60i-a733-gpadc",
++			     "allwinner,sun20i-d1-gpadc";
++		reg = <0x2521000 0x400>;
++		interrupts = <GIC_SPI 38 IRQ_TYPE_LEVEL_HIGH>;
++		clocks = <&ccu CLK_GPADC0>;
++		resets = <&ccu RST_BUS_GPADC0>;
++		#io-channel-cells = <1>;
++		#address-cells = <1>;
++		#size-cells = <0>;
++
++		channel@0 {
++			reg = <0>;
++		};
++	};
++
++	spi0: spi@2540000 {
++		compatible = "allwinner,sun60i-a733-spi",
++			     "allwinner,sun50i-r329-spi";
++		reg = <0x2540000 0x1000>;
++		interrupts = <GIC_SPI 24 IRQ_TYPE_LEVEL_HIGH>;
++		clocks = <&ccu CLK_BUS_SPI0>, <&ccu CLK_SPI0>;
++		clock-names = "ahb", "mod";
++		resets = <&ccu RST_BUS_SPI0>;
++		pinctrl-names = "default";
++		pinctrl-0 = <&spi0_pins>;
++		#address-cells = <1>;
++		#size-cells = <0>;
++
++		flash@0 {
++			compatible = "jedec,spi-nor";
++			reg = <0>;
++			/* At 50 MHz without DMA the controller drops bytes on reads. */
++			spi-max-frequency = <20000000>;
++
++			partitions {
++				compatible = "fixed-partitions";
++				#address-cells = <1>;
++				#size-cells = <1>;
++
++				/* Keep the bootloader area safe from accidental writes. */
++				partition@0 {
++					label = "spi-flash";
++					reg = <0x0 0x1000000>;
++					read-only;
++				};
++			};
++		};
++	};
++
+ 	/* AIC8800D80 Bluetooth, H4 at 1.5 Mbaud. */
+ 	uart1: serial@2501000 {
+ 		compatible = "snps,dw-apb-uart";
+@@ -136,6 +306,13 @@ reg_swout2: swout2 {
+ };
+ 
+ &pio {
++	spi0_pins: spi0-pins {
++		pins = "PC2", "PC3", "PC4", "PC12";
++		function = "spi0";
++		allwinner,pinmux = <5>;
++		drive-strength = <10>;
++	};
++
+ 	uart1_pins: uart1-pins {
+ 		pins = "PG6", "PG7", "PG8", "PG9";
+ 		function = "uart1";

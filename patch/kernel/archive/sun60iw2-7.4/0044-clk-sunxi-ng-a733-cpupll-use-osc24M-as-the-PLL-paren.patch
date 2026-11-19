@@ -1,0 +1,55 @@
+From 5dcfa713b6f13f0a1d0322a09436b383e2f87e76 Mon Sep 17 00:00:00 2001
+From: Iuri Jikidze <37273763+ijiki16@users.noreply.github.com>
+Date: Thu, 19 Nov 2026 03:58:06 +0000
+Subject: [PATCH 44/46] clk: sunxi-ng: a733-cpupll: use osc24M as the PLL
+ parent
+
+The PLLs named "hosc" as their parent, but no clock has that name, so
+they were orphans and every CPU clock reported 0 Hz. Use the 24 MHz
+oscillator's clock name.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/clk/sunxi-ng/ccu-sun60i-a733-cpupll.c | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/clk/sunxi-ng/ccu-sun60i-a733-cpupll.c b/drivers/clk/sunxi-ng/ccu-sun60i-a733-cpupll.c
+index a29c155cd..430424262 100644
+--- a/drivers/clk/sunxi-ng/ccu-sun60i-a733-cpupll.c
++++ b/drivers/clk/sunxi-ng/ccu-sun60i-a733-cpupll.c
+@@ -55,7 +55,7 @@ static struct ccu_mult pll_cpu_back_clk = {
+ 	.mult		= _SUNXI_CCU_MULT_OFFSET_MIN_MAX(8, 8, 0, 53, 105),
+ 	.common		= {
+ 		.reg		= 0x0000,
+-		.hw.init	= CLK_HW_INIT("pll-cpu-back", "hosc",
++		.hw.init	= CLK_HW_INIT("pll-cpu-back", "osc24M",
+ 					&ccu_mult_ops,
+ 					CLK_GET_RATE_NOCACHE |
+ 					CLK_IS_CRITICAL |
+@@ -69,7 +69,7 @@ static struct ccu_mult pll_cpu_l_clk = {
+ 	.mult		= _SUNXI_CCU_MULT_OFFSET_MIN_MAX(8, 8, 0, 28, 94),
+ 	.common		= {
+ 		.reg		= 0x1000,
+-		.hw.init	= CLK_HW_INIT("pll-cpu-l", "hosc",
++		.hw.init	= CLK_HW_INIT("pll-cpu-l", "osc24M",
+ 					&ccu_mult_ops,
+ 					CLK_GET_RATE_NOCACHE |
+ 					CLK_IS_CRITICAL |
+@@ -83,7 +83,7 @@ static struct ccu_mult pll_cpu_b_clk = {
+ 	.mult		= _SUNXI_CCU_MULT_OFFSET_MIN_MAX(8, 8, 0, 28, 94),
+ 	.common		= {
+ 		.reg		= 0x2000,
+-		.hw.init	= CLK_HW_INIT("pll-cpu-b", "hosc",
++		.hw.init	= CLK_HW_INIT("pll-cpu-b", "osc24M",
+ 					&ccu_mult_ops,
+ 					CLK_GET_RATE_NOCACHE |
+ 					CLK_IS_CRITICAL |
+@@ -97,7 +97,7 @@ static struct ccu_mult pll_cpu_dsu_clk = {
+ 	.mult		= _SUNXI_CCU_MULT_OFFSET_MIN_MAX(8, 8, 0, 28, 94),
+ 	.common		= {
+ 		.reg		= 0x3000,
+-		.hw.init	= CLK_HW_INIT("pll-cpu-dsu", "hosc",
++		.hw.init	= CLK_HW_INIT("pll-cpu-dsu", "osc24M",
+ 					&ccu_mult_ops,
+ 					CLK_GET_RATE_NOCACHE |
+ 					CLK_IS_CRITICAL |

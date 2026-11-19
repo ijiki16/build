@@ -1,7 +1,7 @@
 From e8e97fb00e7c8ecdc6e81d1b43995ee76ca18751 Mon Sep 17 00:00:00 2001
 From: Iuri Jikidze <37273763+ijiki16@users.noreply.github.com>
 Date: Wed, 18 Nov 2026 17:15:18 +0000
-Subject: [PATCH 42/42] arm64: dts: allwinner: orangepi-4-pro: add Wi-Fi,
+Subject: [PATCH 42/46] arm64: dts: allwinner: orangepi-4-pro: add Wi-Fi,
  Bluetooth and SoC ID
 
 Describe the AIC8800D80: SDIO on mmc1 with WL_REG_ON as the supply

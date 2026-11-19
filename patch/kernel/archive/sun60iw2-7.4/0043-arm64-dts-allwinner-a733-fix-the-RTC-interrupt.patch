@@ -1,0 +1,27 @@
+From 9e827fd58075d5311ee1c95eb5de3766e956fd58 Mon Sep 17 00:00:00 2001
+From: Iuri Jikidze <37273763+ijiki16@users.noreply.github.com>
+Date: Thu, 19 Nov 2026 03:58:06 +0000
+Subject: [PATCH 43/46] arm64: dts: allwinner: a733: fix the RTC interrupt
+
+The RTC used GIC SPI 157, which belongs to the first EHCI controller, so
+that controller failed to request its interrupt. The vendor device tree
+uses SPI 196 for the RTC.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi b/arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi
+index a05755629..625ed6891 100644
+--- a/arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi
++++ b/arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi
+@@ -277,7 +277,7 @@ ths_calibration: thermal-sensor-calibration@44 {
+ 		rtc: rtc@7090000 {
+ 			compatible = "allwinner,sun60i-a733-rtc";
+ 			reg = <0x7090000 0x400>;
+-			interrupts = <GIC_SPI 157 IRQ_TYPE_LEVEL_HIGH>;
++			interrupts = <GIC_SPI 196 IRQ_TYPE_LEVEL_HIGH>;
+ 			clocks = <&r_ccu CLK_RTC>,
+ 				 <&dcxo>,
+ 				 <&r_ccu CLK_R_AHB>;
