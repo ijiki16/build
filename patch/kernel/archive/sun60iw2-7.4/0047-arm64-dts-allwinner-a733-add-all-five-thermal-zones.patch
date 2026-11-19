@@ -1,0 +1,102 @@
+From 587911b28fd5dd8c8d43d5c46710f5f4932284a9 Mon Sep 17 00:00:00 2001
+From: Iuri Jikidze <37273763+ijiki16@users.noreply.github.com>
+Date: Thu, 19 Nov 2026 05:21:18 +0000
+Subject: [PATCH 47/47] arm64: dts: allwinner: a733: add all five thermal zones
+
+Only the CPU zone was described, so four of the five THS sensors were
+unused. Add the big CPU, little CPU, GPU, NPU and DDR zones. The sensor
+numbers follow the vendor device tree, where they are the THS data
+register index. Each zone has a critical trip at 105 C.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../arm64/boot/dts/allwinner/sun60i-a733.dtsi | 65 ++++++++++++++++++-
+ 1 file changed, 63 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi b/arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi
+index 625ed6891..c4283b753 100644
+--- a/arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi
++++ b/arch/arm64/boot/dts/allwinner/sun60i-a733.dtsi
+@@ -662,14 +662,74 @@ hdmi0_in_tcon3: endpoint {
+ 		};
+ 	};
+ 
++	/*
++	 * Sensor numbers follow the vendor device tree: they are the THS data
++	 * register index, not the order of the zones.
++	 */
+ 	thermal-zones {
+-		cpu-thermal {
++		cpu-little-thermal {
++			polling-delay-passive = <100>;
++			polling-delay = <1000>;
++			thermal-sensors = <&ths 3>;
++
++			trips {
++				cpu_little_crit: cpu-little-crit {
++					temperature = <105000>;
++					hysteresis = <2000>;
++					type = "critical";
++				};
++			};
++		};
++
++		cpu-big-thermal {
+ 			polling-delay-passive = <100>;
+ 			polling-delay = <1000>;
+ 			thermal-sensors = <&ths 0>;
+ 
+ 			trips {
+-				cpu_crit: cpu-crit {
++				cpu_big_crit: cpu-big-crit {
++					temperature = <105000>;
++					hysteresis = <2000>;
++					type = "critical";
++				};
++			};
++		};
++
++		gpu-thermal {
++			polling-delay-passive = <100>;
++			polling-delay = <1000>;
++			thermal-sensors = <&ths 4>;
++
++			trips {
++				gpu_crit: gpu-crit {
++					temperature = <105000>;
++					hysteresis = <2000>;
++					type = "critical";
++				};
++			};
++		};
++
++		npu-thermal {
++			polling-delay-passive = <100>;
++			polling-delay = <1000>;
++			thermal-sensors = <&ths 2>;
++
++			trips {
++				npu_crit: npu-crit {
++					temperature = <105000>;
++					hysteresis = <2000>;
++					type = "critical";
++				};
++			};
++		};
++
++		ddr-thermal {
++			polling-delay-passive = <100>;
++			polling-delay = <1000>;
++			thermal-sensors = <&ths 1>;
++
++			trips {
++				ddr_crit: ddr-crit {
+ 					temperature = <105000>;
+ 					hysteresis = <2000>;
+ 					type = "critical";
+@@ -677,4 +737,5 @@ cpu_crit: cpu-crit {
+ 			};
+ 		};
+ 	};
++
+ };

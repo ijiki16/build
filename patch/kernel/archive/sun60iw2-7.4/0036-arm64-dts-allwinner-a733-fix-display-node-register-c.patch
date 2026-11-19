@@ -1,7 +1,7 @@
 From 4f96c6bde1939acc0754f7ab4b669a2a905c8abd Mon Sep 17 00:00:00 2001
 From: Iuri Jikidze <37273763+ijiki16@users.noreply.github.com>
 Date: Wed, 18 Nov 2026 13:17:30 +0000
-Subject: [PATCH 36/46] arm64: dts: allwinner: a733: fix display node register
+Subject: [PATCH 36/47] arm64: dts: allwinner: a733: fix display node register
  cells
 
 The /soc bus uses one address cell and one size cell, but the DE,

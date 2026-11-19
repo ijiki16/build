@@ -1,7 +1,7 @@
 From 5dcfa713b6f13f0a1d0322a09436b383e2f87e76 Mon Sep 17 00:00:00 2001
 From: Iuri Jikidze <37273763+ijiki16@users.noreply.github.com>
 Date: Thu, 19 Nov 2026 03:58:06 +0000
-Subject: [PATCH 44/46] clk: sunxi-ng: a733-cpupll: use osc24M as the PLL
+Subject: [PATCH 44/47] clk: sunxi-ng: a733-cpupll: use osc24M as the PLL
  parent
 
 The PLLs named "hosc" as their parent, but no clock has that name, so
