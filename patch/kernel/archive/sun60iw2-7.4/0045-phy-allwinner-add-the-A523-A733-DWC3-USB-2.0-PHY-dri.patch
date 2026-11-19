@@ -1,7 +1,7 @@
 From 6f1db21326222180b10ef82fc7918bd619952b1e Mon Sep 17 00:00:00 2001
 From: Iuri Jikidze <37273763+ijiki16@users.noreply.github.com>
 Date: Thu, 19 Nov 2026 03:58:06 +0000
-Subject: [PATCH 45/47] phy: allwinner: add the A523/A733 DWC3 USB 2.0 PHY
+Subject: [PATCH 45/50] phy: allwinner: add the A523/A733 DWC3 USB 2.0 PHY
  driver
 
 Add the vendor USB 2.0 PHY driver for the DWC3 controller, taken from

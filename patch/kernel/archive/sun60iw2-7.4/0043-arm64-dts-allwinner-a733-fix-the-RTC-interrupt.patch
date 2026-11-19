@@ -1,7 +1,7 @@
 From 9e827fd58075d5311ee1c95eb5de3766e956fd58 Mon Sep 17 00:00:00 2001
 From: Iuri Jikidze <37273763+ijiki16@users.noreply.github.com>
 Date: Thu, 19 Nov 2026 03:58:06 +0000
-Subject: [PATCH 43/47] arm64: dts: allwinner: a733: fix the RTC interrupt
+Subject: [PATCH 43/50] arm64: dts: allwinner: a733: fix the RTC interrupt
 
 The RTC used GIC SPI 157, which belongs to the first EHCI controller, so
 that controller failed to request its interrupt. The vendor device tree
