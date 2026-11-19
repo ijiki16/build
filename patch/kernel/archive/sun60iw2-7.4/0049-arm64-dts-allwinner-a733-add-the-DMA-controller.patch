@@ -1,7 +1,7 @@
 From 75eac93dbb66a698c9546a0e25c99809ce980cf4 Mon Sep 17 00:00:00 2001
 From: Iuri Jikidze <37273763+ijiki16@users.noreply.github.com>
 Date: Thu, 19 Nov 2026 15:57:07 +0000
-Subject: [PATCH 49/50] arm64: dts: allwinner: a733: add the DMA controller
+Subject: [PATCH 49/51] arm64: dts: allwinner: a733: add the DMA controller
 
 The mainline sun6i-dma driver supports the A733. Values follow the
 vendor device tree.

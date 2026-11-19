@@ -1,7 +1,7 @@
 From d7021c0a6ae7a4990b9f9c80183dc2ea03d7a2d3 Mon Sep 17 00:00:00 2001
 From: Iuri Jikidze <37273763+ijiki16@users.noreply.github.com>
 Date: Thu, 19 Nov 2026 15:57:07 +0000
-Subject: [PATCH 48/50] dmaengine: sun6i-dma: use high addresses for data
+Subject: [PATCH 48/51] dmaengine: sun6i-dma: use high addresses for data
  buffers
 
 Controllers with high address bits can reach memory above 4 GiB, but

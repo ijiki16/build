@@ -1,0 +1,97 @@
+From 2d8f333a55c0345e30c7ee119871effe5b3ac850 Mon Sep 17 00:00:00 2001
+From: Iuri Jikidze <37273763+ijiki16@users.noreply.github.com>
+Date: Thu, 19 Nov 2026 17:09:09 +0000
+Subject: [PATCH 51/51] arm64: dts: allwinner: orangepi-4-pro: blue OTG port in
+ peripheral mode
+
+The blue OTG port's USB 2.0 lines belong to USB0. Add its MUSB
+controller in peripheral mode, with the PHY as extcon, and give PHY0 to
+it instead of EHCI0/OHCI0. A PC on the other end now sees a USB device.
+
+Disable DWC3 for now: it shares RST_USB_0_DEVICE with USB0, and which
+connector it serves is not known yet. The usb1-vbus supply is no longer
+always on, so the board does not drive VBUS towards the PC.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../sun60i-a733-orangepi-4-pro-sd.dts         | 32 ++++++++++++++++---
+ 1 file changed, 28 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-4-pro-sd.dts b/arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-4-pro-sd.dts
+index 978ed331a..097080a0e 100644
+--- a/arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-4-pro-sd.dts
++++ b/arch/arm64/boot/dts/allwinner/sun60i-a733-orangepi-4-pro-sd.dts
+@@ -51,7 +51,10 @@ reg_usb1_vbus: regulator-usb1-vbus {
+ 		regulator-min-microvolt = <5000000>;
+ 		regulator-max-microvolt = <5000000>;
+ 		gpio = <&pio 1 7 GPIO_ACTIVE_LOW>; /* PB7 */
+-		regulator-always-on;
++		/*
++		 * VBUS of the blue OTG port. Not always on: the port runs in
++		 * peripheral mode, and a PC on the other end supplies VBUS.
++		 */
+ 	};
+ 
+ 	/* AIC8800D80 power: the SDIO host switches it through WL_REG_ON. */
+@@ -96,7 +99,7 @@ usbphy: phy@4100400 {
+ 		#phy-cells = <1>;
+ 	};
+ 
+-	/* The OTG port, in host mode. */
++	/* PHY0 belongs to the OTG controller below, in peripheral mode. */
+ 	ehci0: usb@4101000 {
+ 		compatible = "allwinner,sun60i-a733-ehci", "generic-ehci";
+ 		reg = <0x4101000 0x100>;
+@@ -107,6 +110,7 @@ ehci0: usb@4101000 {
+ 		phys = <&usbphy 0>;
+ 		phy-names = "usb";
+ 		dr_mode = "host";
++		status = "disabled";
+ 	};
+ 
+ 	ohci0: usb@4101400 {
+@@ -119,6 +123,21 @@ ohci0: usb@4101400 {
+ 		phys = <&usbphy 0>;
+ 		phy-names = "usb";
+ 		dr_mode = "host";
++		status = "disabled";
++	};
++
++	/* OTG port (USB0), in peripheral mode: the board is a USB device for a PC. */
++	usb_otg: usb@4100000 {
++		compatible = "allwinner,sun60i-a733-musb", "allwinner,sun8i-h3-musb";
++		reg = <0x4100000 0x400>;
++		interrupts = <GIC_SPI 156 IRQ_TYPE_LEVEL_HIGH>;
++		interrupt-names = "mc";
++		clocks = <&ccu CLK_USB0_DEVICE>;
++		resets = <&ccu RST_USB_0_DEVICE>;
++		phys = <&usbphy 0>;
++		phy-names = "usb";
++		extcon = <&usbphy 0>;
++		dr_mode = "peripheral";
+ 	};
+ 
+ 	ehci1: usb@4200000 {
+@@ -156,7 +175,11 @@ u2phy: phy@6b00000 {
+ 		#phy-cells = <0>;
+ 	};
+ 
+-	/* The USB 3.0 port. It runs at USB 2.0 speed without the combo PHY driver. */
++	/*
++	 * DWC3 controller. Disabled: the blue OTG port's USB 2.0 lines belong to
++	 * USB0 (usb_otg above), and this node shares RST_USB_0_DEVICE with it.
++	 * Which connector DWC3 serves is not known yet.
++	 */
+ 	dwc3: usb@6a00000 {
+ 		compatible = "snps,dwc3";
+ 		reg = <0x6a00000 0x100000>;
+@@ -172,7 +195,8 @@ dwc3: usb@6a00000 {
+ 		assigned-clock-rates = <24000000>, <120000000>, <60000000>;
+ 		resets = <&ccu RST_USB_0_DEVICE>, <&ccu RST_USB_2>;
+ 		power-domains = <&pck600 PD_USB2>;
+-		dr_mode = "host";
++		dr_mode = "peripheral";
++		status = "disabled";
+ 		maximum-speed = "high-speed";
+ 		phy_type = "utmi";
+ 		phys = <&u2phy>;

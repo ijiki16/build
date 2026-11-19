@@ -1,7 +1,7 @@
 From 026c5669bf8cf8d6c086b3d9556daf1384c8fdc0 Mon Sep 17 00:00:00 2001
 From: Iuri Jikidze <37273763+ijiki16@users.noreply.github.com>
 Date: Wed, 18 Nov 2026 13:17:30 +0000
-Subject: [PATCH 38/50] arm64: dts: allwinner: a733: set the TCON-TV endpoint
+Subject: [PATCH 38/51] arm64: dts: allwinner: a733: set the TCON-TV endpoint
  index
 
 The display driver takes the TCON index from the DE output endpoint.

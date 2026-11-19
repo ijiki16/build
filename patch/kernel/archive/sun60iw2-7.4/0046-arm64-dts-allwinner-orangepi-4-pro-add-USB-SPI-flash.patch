@@ -1,7 +1,7 @@
 From 12df4f3f300c0dd2470bce5bf8e937d4cad92f09 Mon Sep 17 00:00:00 2001
 From: Iuri Jikidze <37273763+ijiki16@users.noreply.github.com>
 Date: Thu, 19 Nov 2026 03:58:06 +0000
-Subject: [PATCH 46/50] arm64: dts: allwinner: orangepi-4-pro: add USB, SPI
+Subject: [PATCH 46/51] arm64: dts: allwinner: orangepi-4-pro: add USB, SPI
  flash and ADC
 
 Add the two EHCI/OHCI pairs and the DWC3 controller (USB 2.0 speed, the

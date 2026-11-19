@@ -1,7 +1,7 @@
 From 587911b28fd5dd8c8d43d5c46710f5f4932284a9 Mon Sep 17 00:00:00 2001
 From: Iuri Jikidze <37273763+ijiki16@users.noreply.github.com>
 Date: Thu, 19 Nov 2026 05:21:18 +0000
-Subject: [PATCH 47/50] arm64: dts: allwinner: a733: add all five thermal zones
+Subject: [PATCH 47/51] arm64: dts: allwinner: a733: add all five thermal zones
 
 Only the CPU zone was described, so four of the five THS sensors were
 unused. Add the big CPU, little CPU, GPU, NPU and DDR zones. The sensor

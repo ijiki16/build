@@ -1,7 +1,7 @@
 From 1a92c3dde484f9bb056cd28e46ddd8c0ce503e74 Mon Sep 17 00:00:00 2001
 From: Iuri Jikidze <37273763+ijiki16@users.noreply.github.com>
 Date: Wed, 18 Nov 2026 17:15:18 +0000
-Subject: [PATCH 41/50] net: stmmac: sun60i: derive a stable MAC address from
+Subject: [PATCH 41/51] net: stmmac: sun60i: derive a stable MAC address from
  the SoC ID
 
 Boards without MAC address storage get a random address, so their DHCP

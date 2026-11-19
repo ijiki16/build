@@ -1,7 +1,7 @@
 From 64fb6eb274de2b39131098ad03312578ad26c7ac Mon Sep 17 00:00:00 2001
 From: Iuri Jikidze <37273763+ijiki16@users.noreply.github.com>
 Date: Thu, 19 Nov 2026 15:57:08 +0000
-Subject: [PATCH 50/50] arm64: dts: allwinner: orangepi-4-pro: use DMA for the
+Subject: [PATCH 50/51] arm64: dts: allwinner: orangepi-4-pro: use DMA for the
  SPI flash
 
 Without DMA the SPI controller dropped bytes on reads, even at 20 MHz.
